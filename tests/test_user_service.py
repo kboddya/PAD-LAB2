@@ -5,6 +5,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from tests.conftest import internal_headers
+
 
 @pytest.mark.asyncio
 async def test_profile_created_via_event_and_updated(cluster) -> None:
@@ -49,7 +51,7 @@ async def test_profile_created_via_event_and_updated(cluster) -> None:
     assert forbidden.status_code == 403
 
     # Admin can promote loyalty tier and list users
-    admin_headers = {"X-User-Id": "admin-1", "X-User-Role": "admin"}
+    admin_headers = internal_headers("admin-1", "admin")
     promoted = await users.put(f"/users/{user_id}", headers=admin_headers, json={"loyalty_tier": "gold"})
     assert promoted.status_code == 200
     assert promoted.json()["loyalty_tier"] == "gold"
@@ -65,6 +67,7 @@ async def test_shipping_addresses_and_access_control(cluster) -> None:
 
     created = await users.post(
         "/users",
+        headers=internal_headers("system", "admin"),
         json={
             "user_id": "u-100",
             "email": "u100@example.com",
@@ -74,7 +77,7 @@ async def test_shipping_addresses_and_access_control(cluster) -> None:
     )
     assert created.status_code == 201
 
-    user_headers = {"X-User-Id": "u-100", "X-User-Role": "customer"}
+    user_headers = internal_headers("u-100", "customer")
     addr1 = await users.post(
         "/users/u-100/addresses",
         headers=user_headers,
@@ -112,6 +115,6 @@ async def test_shipping_addresses_and_access_control(cluster) -> None:
     assert defaults[0]["label"] == "Office"
 
     # Another customer cannot read u-100 profile
-    other_headers = {"X-User-Id": "u-999", "X-User-Role": "customer"}
+    other_headers = internal_headers("u-999", "customer")
     denied = await users.get("/users/u-100", headers=other_headers)
     assert denied.status_code == 403

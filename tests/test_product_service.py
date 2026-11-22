@@ -5,12 +5,14 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from tests.conftest import internal_headers
+
 
 @pytest.mark.asyncio
 async def test_product_crud_filtering_and_rbac(cluster) -> None:
     products: httpx.AsyncClient = cluster.service_clients["product-service"]
-    seller_headers = {"X-User-Id": "seller-1", "X-User-Role": "seller"}
-    customer_headers = {"X-User-Id": "cust-1", "X-User-Role": "customer"}
+    seller_headers = internal_headers("seller-1", "seller")
+    customer_headers = internal_headers("cust-1", "customer")
 
     # Customer cannot create product
     denied = await products.post(
@@ -64,7 +66,8 @@ async def test_product_crud_filtering_and_rbac(cluster) -> None:
 @pytest.mark.asyncio
 async def test_inventory_reservation_idempotency_and_saga_events(cluster) -> None:
     products: httpx.AsyncClient = cluster.service_clients["product-service"]
-    seller_headers = {"X-User-Id": "seller-1", "X-User-Role": "seller"}
+    seller_headers = internal_headers("seller-1", "seller")
+    svc_headers = internal_headers("order-service", "admin")
 
     created = await products.post(
         "/products",
@@ -74,17 +77,29 @@ async def test_inventory_reservation_idempotency_and_saga_events(cluster) -> Non
     pid = created.json()["id"]
 
     # Reserve 2 units for order ord-1 (idempotent if retried)
-    r1 = await products.post(f"/products/{pid}/reserve", json={"quantity": 2, "order_id": "ord-1"})
+    r1 = await products.post(
+        f"/products/{pid}/reserve",
+        headers=svc_headers,
+        json={"quantity": 2, "order_id": "ord-1"},
+    )
     assert r1.status_code == 200
     assert r1.json()["reserved_quantity"] == 2
     assert r1.json()["available_quantity"] == 3
 
-    r1_retry = await products.post(f"/products/{pid}/reserve", json={"quantity": 2, "order_id": "ord-1"})
+    r1_retry = await products.post(
+        f"/products/{pid}/reserve",
+        headers=svc_headers,
+        json={"quantity": 2, "order_id": "ord-1"},
+    )
     assert r1_retry.status_code == 200
     assert r1_retry.json()["reserved_quantity"] == 2  # not doubled
 
     # Exceeding available stock fails with 409
-    over = await products.post(f"/products/{pid}/reserve", json={"quantity": 4, "order_id": "ord-2"})
+    over = await products.post(
+        f"/products/{pid}/reserve",
+        headers=svc_headers,
+        json={"quantity": 4, "order_id": "ord-2"},
+    )
     assert over.status_code == 409
 
     # payment.failed triggers Saga compensation releasing ord-1 reservation
@@ -94,7 +109,11 @@ async def test_inventory_reservation_idempotency_and_saga_events(cluster) -> Non
     assert after_fail.json()["stock_quantity"] == 5
 
     # Reserve 3 units for ord-3, then payment.succeeded commits them
-    await products.post(f"/products/{pid}/reserve", json={"quantity": 3, "order_id": "ord-3"})
+    await products.post(
+        f"/products/{pid}/reserve",
+        headers=svc_headers,
+        json={"quantity": 3, "order_id": "ord-3"},
+    )
     await cluster.bus.publish("payment.succeeded", {"order_id": "ord-3"}, "payment-service")
     after_paid = await products.get(f"/products/{pid}")
     assert after_paid.json()["reserved_quantity"] == 0

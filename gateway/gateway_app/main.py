@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 from fastapi import FastAPI, Request, Response
@@ -22,6 +22,37 @@ from shared.errors import (
 from shared.logging import get_request_id, setup_logging
 from shared.middleware import RequestContextMiddleware
 from shared.security import UserContext, decode_token, extract_bearer_token, require_roles
+
+
+class SecurityHeadersMiddleware:
+    """Attach standard HTTP security headers on all API Gateway responses."""
+
+    _SECURITY_HEADERS: tuple[tuple[bytes, bytes], ...] = (
+        (b"x-content-type-options", b"nosniff"),
+        (b"x-frame-options", b"DENY"),
+        (b"referrer-policy", b"strict-origin-when-cross-origin"),
+        (b"cache-control", b"no-store"),
+    )
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_wrapper(message: dict[str, Any]) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                existing_names = {k.lower() for k, _ in headers}
+                for key, val in self._SECURITY_HEADERS:
+                    if key not in existing_names:
+                        headers.append((key, val))
+                message["headers"] = headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 
 def create_app(
@@ -60,7 +91,13 @@ def create_app(
     )
 
     # Order matters in Starlette: last added middleware runs outermost.
-    app.add_middleware(RateLimitMiddleware, limiter=limiter, service_name=cfg.service_name)
+    app.add_middleware(
+        RateLimitMiddleware,
+        limiter=limiter,
+        service_name=cfg.service_name,
+        trust_proxy_headers=cfg.trust_proxy_headers,
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(RequestContextMiddleware, logger=logger)
     register_exception_handlers(app, cfg.service_name, logger)
 
@@ -123,7 +160,11 @@ def create_app(
             user = await _authenticate(request)
             if allowed_roles is not None:
                 require_roles(user, allowed_roles)
-            extra_headers = {"X-User-Id": user.user_id, "X-User-Role": user.role}
+            extra_headers = {
+                "X-User-Id": user.user_id,
+                "X-User-Role": user.role,
+                "X-Internal-Token": cfg.internal_service_token,
+            }
         return await proxy.forward(
             request,
             target_base_url=base_url,
@@ -289,7 +330,11 @@ def create_app(
     async def dashboard(request: Request) -> dict[str, Any]:
         start = time.perf_counter()
         user = await _authenticate(request)
-        headers = {"X-User-Id": user.user_id, "X-User-Role": user.role}
+        headers = {
+            "X-User-Id": user.user_id,
+            "X-User-Role": user.role,
+            "X-Internal-Token": cfg.internal_service_token,
+        }
 
         calls = [
             ("user-service", f"{cfg.user_service_url.rstrip('/')}/users/{user.user_id}"),

@@ -18,7 +18,12 @@ from product_service.service import ProductDomainService
 from shared.app_factory import build_service_app
 from shared.database import DatabaseManager
 from shared.messaging import EventBus, EventEnvelope, create_event_bus
-from shared.security import UserContext, extract_user_context, require_roles
+from shared.security import (
+    UserContext,
+    extract_user_context,
+    is_valid_internal_token,
+    require_roles,
+)
 
 
 def create_app(
@@ -67,7 +72,13 @@ def create_app(
             request,
             jwt_secret=cfg.jwt_secret,
             jwt_algorithm=cfg.jwt_algorithm,
+            internal_service_token=cfg.internal_service_token,
         )
+
+    def _require_internal_or_privileged(request: Request) -> None:
+        if not is_valid_internal_token(request, cfg.internal_service_token):
+            caller = _get_caller(request)
+            require_roles(caller, {"seller", "admin"})
 
     router = APIRouter(prefix="/products", tags=["Products"])
 
@@ -151,25 +162,29 @@ def create_app(
     @router.post(
         "/{product_id}/reserve",
         response_model=InventoryActionResponse,
-        summary="Reserve product inventory for an order",
+        summary="Reserve product inventory for an order (internal/seller/admin)",
     )
     async def reserve_stock(
         product_id: str,
         payload: InventoryAdjustRequest,
+        request: Request,
         session: Session = Depends(db.get_db),
     ) -> InventoryActionResponse:
+        _require_internal_or_privileged(request)
         return domain.reserve_stock(session, product_id, payload)
 
     @router.post(
         "/{product_id}/release",
         response_model=InventoryActionResponse,
-        summary="Release previously reserved product inventory",
+        summary="Release previously reserved product inventory (internal/seller/admin)",
     )
     async def release_stock(
         product_id: str,
         payload: InventoryAdjustRequest,
+        request: Request,
         session: Session = Depends(db.get_db),
     ) -> InventoryActionResponse:
+        _require_internal_or_privileged(request)
         return domain.release_stock(session, product_id, payload)
 
     app.include_router(router)

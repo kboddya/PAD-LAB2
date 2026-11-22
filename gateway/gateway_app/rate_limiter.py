@@ -72,10 +72,18 @@ class SlidingWindowRateLimiter:
 class RateLimitMiddleware:
     """Pure ASGI middleware enforcing rate limits on /api/* endpoints."""
 
-    def __init__(self, app: Any, limiter: SlidingWindowRateLimiter, service_name: str) -> None:
+    def __init__(
+        self,
+        app: Any,
+        limiter: SlidingWindowRateLimiter,
+        service_name: str,
+        *,
+        trust_proxy_headers: bool = False,
+    ) -> None:
         self.app = app
         self.limiter = limiter
         self.service_name = service_name
+        self.trust_proxy_headers = trust_proxy_headers
 
     async def __call__(self, scope: dict[str, Any], receive: Callable[..., Any], send: Callable[..., Any]) -> None:
         if scope["type"] != "http":
@@ -87,7 +95,7 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        client_key = self._extract_client_key(scope)
+        client_key = self._extract_client_key(scope, trust_proxy_headers=self.trust_proxy_headers)
         decision = self.limiter.check(client_key)
 
         rate_headers = [
@@ -133,13 +141,16 @@ class RateLimitMiddleware:
         await self.app(scope, receive, send_wrapper)
 
     @staticmethod
-    def _extract_client_key(scope: dict[str, Any]) -> str:
+    def _extract_client_key(scope: dict[str, Any], *, trust_proxy_headers: bool = False) -> str:
         headers = {
             k.decode("latin-1").lower(): v.decode("latin-1")
             for k, v in scope.get("headers", [])
         }
-        if forwarded_for := headers.get("x-forwarded-for"):
-            return forwarded_for.split(",")[0].strip()
+        if trust_proxy_headers:
+            if real_ip := headers.get("x-real-ip"):
+                return real_ip.strip()
+            if forwarded_for := headers.get("x-forwarded-for"):
+                return forwarded_for.split(",")[-1].strip()
         if auth := headers.get("authorization"):
             return f"token:{auth[-24:]}"
         client = scope.get("client")

@@ -13,7 +13,7 @@ from shared.app_factory import build_service_app
 from shared.database import DatabaseManager
 from shared.errors import ForbiddenError
 from shared.messaging import EventBus, create_event_bus
-from shared.security import UserContext, extract_user_context
+from shared.security import UserContext, extract_user_context, is_valid_internal_token
 
 
 def create_app(
@@ -39,6 +39,7 @@ def create_app(
             request,
             jwt_secret=cfg.jwt_secret,
             jwt_algorithm=cfg.jwt_algorithm,
+            internal_service_token=cfg.internal_service_token,
         )
 
     router = APIRouter(prefix="/payments", tags=["Payments"])
@@ -51,9 +52,15 @@ def create_app(
     )
     async def create_payment(
         payload: PaymentCreateRequest,
+        request: Request,
         response: Response,
         session: Session = Depends(db.get_db),
     ) -> PaymentResponse:
+        if not is_valid_internal_token(request, cfg.internal_service_token):
+            caller = _get_caller(request)
+            if caller.role != "admin" and caller.user_id != payload.user_id:
+                raise ForbiddenError("Cannot initiate payment on behalf of another user")
+
         payment, is_new = domain.process_payment(session, payload)
         if not is_new:
             response.status_code = status.HTTP_200_OK

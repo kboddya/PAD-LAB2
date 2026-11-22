@@ -111,16 +111,36 @@ def extract_bearer_token(request: Request) -> str:
     return token
 
 
+def is_valid_internal_token(request: Request, expected_token: str | None) -> bool:
+    """Verify the shared internal service header via constant-time comparison."""
+    if not expected_token:
+        return False
+    provided = request.headers.get("X-Internal-Token", "")
+    if not provided:
+        return False
+    return hmac.compare_digest(provided, expected_token)
+
+
+def require_internal_service(request: Request, expected_token: str | None) -> None:
+    """Require a valid X-Internal-Token for service-to-service calls."""
+    if not is_valid_internal_token(request, expected_token):
+        raise UnauthorizedError(
+            "Valid internal service credentials are required",
+            error_code="INVALID_INTERNAL_TOKEN",
+        )
+
+
 def extract_user_context(
     request: Request,
     *,
     jwt_secret: str | None = None,
     jwt_algorithm: str = "HS256",
+    internal_service_token: str | None = None,
 ) -> UserContext:
-    """Resolve user identity from API Gateway headers or fallback Bearer JWT."""
+    """Resolve user identity from verified gateway headers or Bearer JWT."""
     header_user_id = request.headers.get("X-User-Id")
     header_role = request.headers.get("X-User-Role")
-    if header_user_id and header_role:
+    if header_user_id and header_role and is_valid_internal_token(request, internal_service_token):
         return UserContext(user_id=header_user_id, role=header_role)
 
     if jwt_secret:

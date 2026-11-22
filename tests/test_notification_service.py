@@ -5,6 +5,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from tests.conftest import internal_headers
+
 
 @pytest.mark.asyncio
 async def test_notifications_from_events_and_read_management(cluster) -> None:
@@ -26,7 +28,7 @@ async def test_notifications_from_events_and_read_management(cluster) -> None:
         "payment-service",
     )
 
-    headers = {"X-User-Id": "u-notif-1", "X-User-Role": "customer"}
+    headers = internal_headers("u-notif-1", "customer")
     count = await notifs.get("/notifications/unread-count", headers=headers)
     assert count.status_code == 200
     assert count.json()["unread_count"] == 3
@@ -58,6 +60,6 @@ async def test_notifications_from_events_and_read_management(cluster) -> None:
     # Other user cannot mark notification read
     forbidden = await notifs.patch(
         f"/notifications/{first_id}/read",
-        headers={"X-User-Id": "other-user", "X-User-Role": "customer"},
+        headers=internal_headers("other-user", "customer"),
     )
     assert forbidden.status_code == 403

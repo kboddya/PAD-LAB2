@@ -1,0 +1,81 @@
+{
+  "phase": "before",
+  "timestamp": "2026-11-22T20:35:26.549929+00:00",
+  "total_checks": 8,
+  "passed": 2,
+  "failed": 6,
+  "findings": [
+    {
+      "check_id": "SEC-01",
+      "title": "Public self-registration as admin role",
+      "severity": "Critical",
+      "owasp_category": "API5:2023 Broken Function Level Authorization",
+      "status": "FAIL",
+      "evidence": "POST /api/auth/register with role='admin' returned HTTP 201",
+      "remediation": "Restrict public RegisterRequest.role to customer/seller only."
+    },
+    {
+      "check_id": "SEC-02",
+      "title": "Header spoofing (X-User-Role: admin) without internal service token",
+      "severity": "Critical",
+      "owasp_category": "API2:2023 Broken Authentication / API5",
+      "status": "FAIL",
+      "evidence": "GET user-service /users with forged X-User-Role='admin' returned HTTP 200",
+      "remediation": "Require HMAC-verified X-Internal-Token alongside X-User-Id/X-User-Role headers."
+    },
+    {
+      "check_id": "SEC-03",
+      "title": "Unauthenticated internal endpoints & cross-user payment initiation",
+      "severity": "High",
+      "owasp_category": "API1:2023 Broken Object Level Authorization",
+      "status": "FAIL",
+      "evidence": "POST /users=201, POST /products/reserve=200, cross-user POST /payments=201",
+      "remediation": "Enforce require_internal_service or caller ownership/admin check on mutation endpoints."
+    },
+    {
+      "check_id": "SEC-04",
+      "title": "Rate Limiter bypass via rotating X-Forwarded-For header",
+      "severity": "High",
+      "owasp_category": "API4:2023 Unrestricted Resource Consumption",
+      "status": "FAIL",
+      "evidence": "5 requests with rotating X-Forwarded-For yielded statuses [200, 200, 200, 200, 200]",
+      "remediation": "Ignore untrusted X-Forwarded-For by default; trust X-Real-IP only behind NGINX."
+    },
+    {
+      "check_id": "SEC-05",
+      "title": "Weak password policy allows short numeric-only passwords",
+      "severity": "Medium",
+      "owasp_category": "API2:2023 Broken Authentication",
+      "status": "FAIL",
+      "evidence": "Registration with password='123456' returned HTTP 201",
+      "remediation": "Require >= 8 chars with at least one letter and one digit."
+    },
+    {
+      "check_id": "SEC-06",
+      "title": "Missing HTTP security headers & NGINX hardening directives",
+      "severity": "Medium",
+      "owasp_category": "API8:2023 Security Misconfiguration",
+      "status": "FAIL",
+      "evidence": "gateway_security_headers=False, nginx_hardening=False",
+      "remediation": "Add nosniff/DENY/Cache-Control headers in Gateway and CSP/server_tokens off in NGINX."
+    },
+    {
+      "check_id": "SEC-07",
+      "title": "SQL Injection & Stored/Reflected XSS protection",
+      "severity": "High",
+      "owasp_category": "Injection / XSS",
+      "status": "PASS",
+      "evidence": "SQLi search HTTP 200 (matches=0), SQLi login HTTP 401, esc() present=True",
+      "remediation": "Use parameterized SQLAlchemy queries and HTML escaping on all rendered fields."
+    },
+    {
+      "check_id": "SEC-08",
+      "title": "JWT revocation enforcement & error trace non-disclosure",
+      "severity": "Medium",
+      "owasp_category": "API2 / API8 Security Misconfiguration",
+      "status": "PASS",
+      "evidence": "post-logout dashboard HTTP 401, validation error HTTP 422, Traceback leaked=False",
+      "remediation": "Enforce JTI revocation check on Gateway and uniform sanitized error envelopes."
+    }
+  ]
+}

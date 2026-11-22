@@ -173,7 +173,7 @@ function renderProducts() {
         <div class="muted">Available: <strong>${Number(p.available_quantity)}</strong> (reserved: ${Number(p.reserved_quantity)})</div>
         <div class="price-row">
           <span class="price">$${Number(p.price).toFixed(2)}</span>
-          <button class="secondary-btn" onclick="addToCart('${esc(p.id)}')" ${p.available_quantity <= 0 ? "disabled" : ""}>
+          <button class="secondary-btn" data-action="add-to-cart" data-id="${esc(p.id)}" ${p.available_quantity <= 0 ? "disabled" : ""}>
             ${p.available_quantity > 0 ? "Add to Cart" : "Out of stock"}
           </button>
         </div>
@@ -221,7 +221,7 @@ function renderCart() {
         <span>${esc(c.product.name)} × ${Number(c.quantity)}</span>
         <span>
           $${(c.quantity * c.product.price).toFixed(2)}
-          <button class="danger-mini" onclick="removeFromCart('${esc(c.product.id)}')">×</button>
+          <button class="danger-mini" data-action="remove-from-cart" data-id="${esc(c.product.id)}">×</button>
         </span>
       </div>`
     )
@@ -281,7 +281,7 @@ async function loadDashboard() {
               <span class="muted">${o.items.map((i) => `${esc(i.product_name)} × ${Number(i.quantity)}`).join(", ")}</span>
               ${
                 o.status === "paid" || o.status === "pending"
-                  ? `<button class="danger-mini" onclick="cancelOrder('${esc(o.id)}')">Cancel Order</button>`
+                  ? `<button class="danger-mini" data-action="cancel-order" data-id="${esc(o.id)}">Cancel Order</button>`
                   : ""
               }
             </div>
@@ -323,7 +323,7 @@ async function loadNotifications() {
               ${
                 n.is_read
                   ? `<span class="muted">Read</span>`
-                  : `<button class="secondary-btn" onclick="markNotificationRead('${esc(n.id)}')">Mark read</button>`
+                  : `<button class="secondary-btn" data-action="mark-notif-read" data-id="${esc(n.id)}">Mark read</button>`
               }
             </div>
             <div class="muted">${esc(n.message)}</div>
@@ -346,6 +346,16 @@ window.markNotificationRead = async (id) => {
 };
 
 function setupEvents() {
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const { action, id } = btn.dataset;
+    if (action === "add-to-cart") window.addToCart(id);
+    else if (action === "remove-from-cart") window.removeFromCart(id);
+    else if (action === "cancel-order") window.cancelOrder(id);
+    else if (action === "mark-notif-read") window.markNotificationRead(id);
+  });
+
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));

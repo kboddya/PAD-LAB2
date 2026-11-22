@@ -38,6 +38,7 @@ class OrderDomainService:
             "X-Request-ID": get_request_id(),
             "X-User-Id": user_id,
             "X-User-Role": role,
+            "X-Internal-Token": self.settings.internal_service_token,
         }
 
     async def verify_user_exists(

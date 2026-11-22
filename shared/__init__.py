@@ -26,6 +26,8 @@ from shared.security import (
     decode_token,
     extract_user_context,
     hash_password,
+    is_valid_internal_token,
+    require_internal_service,
     verify_password,
 )
 
@@ -56,8 +58,10 @@ __all__ = [
     "extract_user_context",
     "get_request_id",
     "hash_password",
+    "is_valid_internal_token",
     "register_exception_handlers",
     "request_id_var",
+    "require_internal_service",
     "setup_logging",
     "verify_password",
 ]

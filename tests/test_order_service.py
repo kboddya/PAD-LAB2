@@ -5,6 +5,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from tests.conftest import internal_headers
+
 
 async def _seed_user_and_products(cluster):
     users = cluster.service_clients["user-service"]
@@ -12,9 +14,10 @@ async def _seed_user_and_products(cluster):
 
     await users.post(
         "/users",
+        headers=internal_headers("system", "admin"),
         json={"user_id": "buyer-1", "email": "buyer1@example.com", "username": "buyer1", "full_name": "Buyer One"},
     )
-    seller_headers = {"X-User-Id": "seller-1", "X-User-Role": "seller"}
+    seller_headers = internal_headers("seller-1", "seller")
     p1 = (
         await products.post(
             "/products",
@@ -37,7 +40,7 @@ async def test_order_creation_happy_path_and_cancel(cluster) -> None:
     p1, _ = await _seed_user_and_products(cluster)
     orders: httpx.AsyncClient = cluster.service_clients["order-service"]
     products: httpx.AsyncClient = cluster.service_clients["product-service"]
-    buyer_headers = {"X-User-Id": "buyer-1", "X-User-Role": "customer"}
+    buyer_headers = internal_headers("buyer-1", "customer")
 
     created = await orders.post(
         "/orders",
@@ -72,7 +75,7 @@ async def test_order_partial_stock_failure_rolls_back_first_item(cluster) -> Non
     p1, p2 = await _seed_user_and_products(cluster)
     orders: httpx.AsyncClient = cluster.service_clients["order-service"]
     products: httpx.AsyncClient = cluster.service_clients["product-service"]
-    buyer_headers = {"X-User-Id": "buyer-1", "X-User-Role": "customer"}
+    buyer_headers = internal_headers("buyer-1", "customer")
 
     # Request 2 of ITEM-A (ok) and 5 of ITEM-B (only 1 in stock -> 409)
     resp = await orders.post(
@@ -99,7 +102,7 @@ async def test_order_compensates_when_payment_service_unavailable(cluster) -> No
     p1, _ = await _seed_user_and_products(cluster)
     orders: httpx.AsyncClient = cluster.service_clients["order-service"]
     products: httpx.AsyncClient = cluster.service_clients["product-service"]
-    buyer_headers = {"X-User-Id": "buyer-1", "X-User-Role": "customer"}
+    buyer_headers = internal_headers("buyer-1", "customer")
 
     cluster.transport.faults["payment-service"] = "connect_error"
     resp = await orders.post(

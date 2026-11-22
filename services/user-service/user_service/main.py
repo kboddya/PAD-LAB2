@@ -9,7 +9,12 @@ from shared.app_factory import build_service_app
 from shared.database import DatabaseManager
 from shared.errors import ForbiddenError
 from shared.messaging import EventBus, EventEnvelope, create_event_bus
-from shared.security import UserContext, extract_user_context, require_roles
+from shared.security import (
+    UserContext,
+    extract_user_context,
+    is_valid_internal_token,
+    require_roles,
+)
 from user_service.config import UserSettings
 from user_service.models import UserBase
 from user_service.schemas import (
@@ -62,6 +67,7 @@ def create_app(
             request,
             jwt_secret=cfg.jwt_secret,
             jwt_algorithm=cfg.jwt_algorithm,
+            internal_service_token=cfg.internal_service_token,
         )
 
     def _ensure_self_or_admin(caller: UserContext, target_user_id: str) -> None:
@@ -74,12 +80,16 @@ def create_app(
         "",
         response_model=UserProfileResponse,
         status_code=status.HTTP_201_CREATED,
-        summary="Create user profile (idempotent fallback)",
+        summary="Create user profile (internal service or admin only)",
     )
     async def create_user(
         payload: UserCreateRequest,
+        request: Request,
         session: Session = Depends(db.get_db),
     ) -> UserProfileResponse:
+        if not is_valid_internal_token(request, cfg.internal_service_token):
+            caller = _get_caller(request)
+            require_roles(caller, {"admin"})
         profile = domain.create_profile_idempotent(session, payload)
         return UserProfileResponse.model_validate(profile)
 

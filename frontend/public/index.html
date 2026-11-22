@@ -182,12 +182,11 @@
             <label>Email <input name="email" type="email" placeholder="buyer@shopflow.io" required /></label>
             <label>Username <input name="username" placeholder="alice" minlength="3" required /></label>
             <label>Full Name <input name="full_name" placeholder="Alice Buyer" /></label>
-            <label>Password <input name="password" type="password" minlength="6" required /></label>
+            <label>Password <input name="password" type="password" minlength="8" placeholder="Min 8 chars (letters + digits)" required /></label>
             <label>Role
               <select name="role">
                 <option value="customer">customer</option>
                 <option value="seller">seller</option>
-                <option value="admin">admin</option>
               </select>
             </label>
             <button type="submit" class="primary-btn">Create Account</button>

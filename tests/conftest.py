@@ -80,11 +80,24 @@ class ShopFlowCluster:
         await self.transport.aclose()
 
 
+INTERNAL_SERVICE_TOKEN = "test-internal-service-token-32chars"
+
+
+def internal_headers(user_id: str = "system", role: str = "admin") -> dict[str, str]:
+    """Build trusted service-to-service headers with valid X-Internal-Token."""
+    return {
+        "X-User-Id": user_id,
+        "X-User-Role": role,
+        "X-Internal-Token": INTERNAL_SERVICE_TOKEN,
+    }
+
+
 def build_test_cluster(
     db_dir: Path,
     *,
     rate_limit_requests: int = 100,
     rate_limit_window_seconds: int = 60,
+    trust_proxy_headers: bool = False,
     log_json: bool = True,
 ) -> ShopFlowCluster:
     """Instantiate all 6 microservices + gateway wired via InMemoryEventBus and ASGITransport."""
@@ -96,6 +109,7 @@ def build_test_cluster(
             database_url=f"sqlite:///{db_dir / 'auth.db'}",
             rabbitmq_url="memory://",
             jwt_secret=jwt_secret,
+            internal_service_token=INTERNAL_SERVICE_TOKEN,
             log_json=log_json,
         ),
         event_bus=bus,
@@ -105,6 +119,7 @@ def build_test_cluster(
             database_url=f"sqlite:///{db_dir / 'user.db'}",
             rabbitmq_url="memory://",
             jwt_secret=jwt_secret,
+            internal_service_token=INTERNAL_SERVICE_TOKEN,
             log_json=log_json,
         ),
         event_bus=bus,
@@ -114,6 +129,7 @@ def build_test_cluster(
             database_url=f"sqlite:///{db_dir / 'product.db'}",
             rabbitmq_url="memory://",
             jwt_secret=jwt_secret,
+            internal_service_token=INTERNAL_SERVICE_TOKEN,
             log_json=log_json,
         ),
         event_bus=bus,
@@ -123,6 +139,7 @@ def build_test_cluster(
             database_url=f"sqlite:///{db_dir / 'payment.db'}",
             rabbitmq_url="memory://",
             jwt_secret=jwt_secret,
+            internal_service_token=INTERNAL_SERVICE_TOKEN,
             log_json=log_json,
             max_single_payment_amount=5000.0,
         ),
@@ -133,6 +150,7 @@ def build_test_cluster(
             database_url=f"sqlite:///{db_dir / 'notification.db'}",
             rabbitmq_url="memory://",
             jwt_secret=jwt_secret,
+            internal_service_token=INTERNAL_SERVICE_TOKEN,
             log_json=log_json,
         ),
         event_bus=bus,
@@ -153,6 +171,7 @@ def build_test_cluster(
             database_url=f"sqlite:///{db_dir / 'order.db'}",
             rabbitmq_url="memory://",
             jwt_secret=jwt_secret,
+            internal_service_token=INTERNAL_SERVICE_TOKEN,
             log_json=log_json,
         ),
         event_bus=bus,
@@ -168,8 +187,10 @@ def build_test_cluster(
     gateway_app = create_gateway_app(
         settings=GatewaySettings(
             jwt_secret=jwt_secret,
+            internal_service_token=INTERNAL_SERVICE_TOKEN,
             rate_limit_requests=rate_limit_requests,
             rate_limit_window_seconds=rate_limit_window_seconds,
+            trust_proxy_headers=trust_proxy_headers,
             log_json=log_json,
         ),
         http_client=gateway_http_client,

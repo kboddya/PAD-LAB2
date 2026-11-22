@@ -20,3 +20,4 @@ class GatewaySettings(BaseServiceSettings):
     rate_limit_window_seconds: int = 60
     proxy_timeout_seconds: float = 10.0
     verify_tokens_remotely: bool = True
+    trust_proxy_headers: bool = False

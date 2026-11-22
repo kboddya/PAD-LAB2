@@ -14,8 +14,8 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 class RegisterRequest(BaseModel):
     email: str = Field(..., min_length=5, max_length=255)
     username: str = Field(..., min_length=3, max_length=64)
-    password: str = Field(..., min_length=6, max_length=128)
-    role: Literal["customer", "seller", "admin"] = "customer"
+    password: str = Field(..., min_length=8, max_length=128)
+    role: Literal["customer", "seller"] = "customer"
     full_name: str | None = Field(default=None, max_length=120)
 
     @field_validator("email")
@@ -33,6 +33,15 @@ class RegisterRequest(BaseModel):
         if not cleaned:
             raise ValueError("Username cannot be blank")
         return cleaned
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        has_letter = any(ch.isalpha() for ch in value)
+        has_digit = any(ch.isdigit() for ch in value)
+        if not (has_letter and has_digit):
+            raise ValueError("Password must contain at least one letter and one digit")
+        return value
 
 
 class LoginRequest(BaseModel):

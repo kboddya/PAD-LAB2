@@ -81,6 +81,7 @@ def create_app(
             request,
             jwt_secret=cfg.jwt_secret,
             jwt_algorithm=cfg.jwt_algorithm,
+            internal_service_token=cfg.internal_service_token,
         )
 
     router = APIRouter(prefix="/orders", tags=["Orders"])

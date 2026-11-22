@@ -362,7 +362,26 @@ cd Lab2
 .venv/bin/pytest -v
 ```
 
-Фактический результат прогона: **`22 passed in 0.9s`** (включая проверку сетевой изоляции `docker-compose.yml` и конфигурации `frontend/nginx.conf`).
+Фактический результат прогона: **`23 passed in 1.24s`** (включая тесты сетевой изоляции `docker-compose.yml`, `frontend/nginx.conf` и регрессионный тест всех 8 проверок безопасности [test_security.py](file:///Users/kboddya/Dev/Univ/PAD/Lab2/tests/test_security.py)).
+
+---
+
+## 9.1. Тестирование безопасности (До и После исправлений)
+
+Проведён активный аудит по OWASP API Security Top 10 (2023) с помощью [scripts/security_audit.py](file:///Users/kboddya/Dev/Univ/PAD/Lab2/scripts/security_audit.py). Подробный разбор см. в [docs/security_report.md](file:///Users/kboddya/Dev/Univ/PAD/Lab2/docs/security_report.md).
+
+| ID | Проверка безопасности | Уровень | ДО исправлений | ПОСЛЕ исправлений | Принятая мера |
+| --- | --- | --- | --- | --- | --- |
+| `SEC-01` | Саморегистрация с ролью `admin` (`API5`) | Critical | **FAIL** (`HTTP 201`) | **PASS** (`HTTP 422`) | Публично разрешены только роли `customer`/`seller` |
+| `SEC-02` | Спуфинг `X-User-Role: admin` без внутреннего токена (`API2/5`) | Critical | **FAIL** (`HTTP 200`) | **PASS** (`HTTP 401`) | Обязательная HMAC-проверка `X-Internal-Token` |
+| `SEC-03` | Открытые внутренние endpoints и чужие платежи (`API1`) | High | **FAIL** (`201`/`200`/`201`) | **PASS** (`401`/`401`/`403`) | Защита `/users`, `/reserve`, `/release` и проверка владельца в `/payments` |
+| `SEC-04` | Обход Rate Limiter подменой `X-Forwarded-For` (`API4`) | High | **FAIL** (`5×200`) | **PASS** (`3×200, 2×429`) | Игнорирование недоверенного `X-Forwarded-For` (`trust_proxy_headers`) |
+| `SEC-05` | Слабый пароль `'123456'` (`API2`) | Medium | **FAIL** (`HTTP 201`) | **PASS** (`HTTP 422`) | Политика пароля: `>= 8` символов, буква + цифра |
+| `SEC-06` | Отсутствие HTTP security-заголовков и CSP (`API8`) | Medium | **FAIL** (`False`/`False`) | **PASS** (`True`/`True`) | `nosniff`, `DENY`, `no-store` на Gateway; `server_tokens off`, строгий `CSP` в NGINX |
+| `SEC-07` | Защита от SQLi (`' OR '1'='1`) и XSS (`esc()`) | High | **PASS** (`200 (0)`, `401`) | **PASS** (`200 (0)`, `401`) | Параметризованные запросы + удаление inline `onclick` для строгого CSP |
+| `SEC-08` | Отзыв JWT при logout и отсутствие stack trace | Medium | **PASS** (`401`, `422`) | **PASS** (`401`, `422`) | Проверка blacklist `jti` и безопасные `ErrorResponse` |
+
+**Итог по Lab2**: ДО исправлений — **`2/8 PASS`**, ПОСЛЕ исправлений — **`8/8 PASS (0 FAIL)`**.
 
 ---
 

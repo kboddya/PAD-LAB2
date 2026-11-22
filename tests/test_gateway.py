@@ -71,25 +71,30 @@ async def test_gateway_auth_rbac_and_dashboard_graceful_degradation(cluster) -> 
 
 @pytest.mark.asyncio
 async def test_gateway_rate_limiting_and_timeout_mapping(tmp_path: Path) -> None:
-    limited_cluster = build_test_cluster(tmp_path, rate_limit_requests=3, rate_limit_window_seconds=60)
+    limited_cluster = build_test_cluster(
+        tmp_path,
+        rate_limit_requests=3,
+        rate_limit_window_seconds=60,
+        trust_proxy_headers=True,
+    )
     try:
         gw = limited_cluster.gateway_client
         assert gw is not None
 
         for idx in range(3):
-            resp = await gw.get("/api/products", headers={"X-Forwarded-For": "10.0.0.42"})
+            resp = await gw.get("/api/products", headers={"X-Real-IP": "10.0.0.42"})
             assert resp.status_code == 200
             assert resp.headers["X-RateLimit-Limit"] == "3"
             assert resp.headers["X-RateLimit-Remaining"] == str(2 - idx)
 
-        blocked = await gw.get("/api/products", headers={"X-Forwarded-For": "10.0.0.42"})
+        blocked = await gw.get("/api/products", headers={"X-Real-IP": "10.0.0.42"})
         assert blocked.status_code == 429
         assert blocked.json()["error"]["code"] == "RATE_LIMIT_EXCEEDED"
         assert "X-Request-ID" in blocked.headers
 
         # Timeout fault translation -> 504
         limited_cluster.transport.faults["product-service"] = "timeout"
-        timed_out = await gw.get("/api/products", headers={"X-Forwarded-For": "10.0.0.99"})
+        timed_out = await gw.get("/api/products", headers={"X-Real-IP": "10.0.0.99"})
         assert timed_out.status_code == 504
         assert timed_out.json()["error"]["code"] == "GATEWAY_TIMEOUT"
     finally:

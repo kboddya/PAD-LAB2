@@ -134,7 +134,10 @@ class RateLimitMiddleware:
 
     @staticmethod
     def _extract_client_key(scope: dict[str, Any]) -> str:
-        headers = {k.lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
         if forwarded_for := headers.get("x-forwarded-for"):
             return forwarded_for.split(",")[0].strip()
         if auth := headers.get("authorization"):

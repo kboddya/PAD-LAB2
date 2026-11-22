@@ -33,6 +33,7 @@
   5. `payment-service` (`:8005`, `payment_db`) — обработка платежей с идемпотентностью (`idempotency_key` / `order_id`), лимит суммы транзакции, возвраты (`refund`), симуляция отказа для проверки Saga.
   6. `notification-service` (`:8006`, `notification_db`) — событийный центр уведомлений с дедупликацией по `event_id`, фильтрацией непрочитанных и массовым прочтением.
   7. `api-gateway` (`:8000`, stateless) — маршрутизация `/api/*`, проверка JWT и RBAC, Sliding-Window Rate Limiter (`X-RateLimit-*`, HTTP 429), параллельная агрегация `GET /api/dashboard` с *graceful degradation*.
+- **Отдельный Frontend-сервис (`frontend` на NGINX `:8080`) и сетевая изоляция**: в `docker-compose.yml` все базы данных, RabbitMQ, 6 бизнес-сервисов и `api-gateway` полностью закрыты от хоста (доступны только по внутренней bridge-сети `shopflow-net` через `expose:`). Наружу опубликован **только** `frontend:8080`, который отдаёт SPA-интерфейс и проксирует `/api/` на `http://api-gateway:8000`.
 - **Синхронная + асинхронная коммуникация**: HTTP/REST (`httpx`) на критическом пути заказа + брокер сообщений **RabbitMQ** (`aio-pika`, Topic Exchange `shopflow.events`) с поддержкой `InMemoryEventBus` для быстрых детерминированных тестов без внешнего брокера.
 - **Сквозная трассировка (`X-Request-ID`)**: единый идентификатор запроса проходит через API Gateway, все downstream HTTP-вызовы, payload событий RabbitMQ и JSON-логи каждого сервиса.
 - **Готовность к контейнеризации и Kubernetes (Lab 3)**: каждый сервис имеет оптимизированный non-root `Dockerfile`, `.dockerignore`, `GET /health` и `GET /ready`.
@@ -45,7 +46,8 @@
 
 ```mermaid
 flowchart TB
-    Client([Client / Frontend / CLI]) --> GW[API Gateway :8000<br/>JWT Auth, RBAC, Rate Limit, Aggregation]
+    Client([Browser / Client]) -->|:8080 ONLY| FE[frontend :8080<br/>NGINX Unprivileged SPA + Reverse Proxy]
+    FE -->|internal /api/*| GW[API Gateway :8000<br/>JWT Auth, RBAC, Rate Limit, Aggregation]
 
     GW --> Auth[auth-service :8001]
     GW --> User[user-service :8002]
@@ -141,6 +143,7 @@ Lab2/
 │   ├── payment-service/            # Dockerfile, .dockerignore, requirements.txt, payment_service/
 │   └── notification-service/       # Dockerfile, .dockerignore, requirements.txt, notification_service/
 ├── gateway/                        # Dockerfile, .dockerignore, requirements.txt, gateway_app/
+├── frontend/                       # Отдельный NGINX-сервис: Dockerfile, nginx.conf, public/
 ├── scripts/
 │   └── run_experiments.py          # Скрипт проведения 4 архитектурных бенчмарков
 ├── experiments/                    # Результаты экспериментов в CSV
@@ -196,9 +199,9 @@ docker compose up --build
 ```
 
 После запуска:
-- **API Gateway**: `http://localhost:8000` (Swagger UI: `http://localhost:8000/docs`, readiness: `http://localhost:8000/ready`)
-- **RabbitMQ Management UI**: `http://localhost:15672` (`guest` / `guest`)
-- Прямой доступ к сервисам (при отладке): ports `8001`–`8006` (`/docs`, `/health`, `/ready`).
+- **Frontend UI (единственный внешний порт)**: `http://localhost:8080`
+- **API через встроенный прокси Frontend**: `http://localhost:8080/api/*` (и Swagger UI на `http://localhost:8080/docs`, `/ready`)
+- Все внутренние сервисы (`postgres`, `rabbitmq`, `auth-service`..`notification-service`, `api-gateway`) закрыты от хоста (`expose:` вместо `ports:`) и общаются исключительно внутри сети `shopflow-net`.
 
 > *Примечание по среде проверки*: конфигурация `Lab2/docker-compose.yml` валидирована командой `docker compose -f Lab2/docker-compose.yml config --quiet`, однако на данной машине Docker-демон не был запущен в момент проверки, поэтому полная интеграционная верификация и эксперименты выполнялись на реальных ASGI-приложениях через `httpx.ASGITransport` и SQLite.
 
@@ -359,7 +362,7 @@ cd Lab2
 .venv/bin/pytest -v
 ```
 
-Фактический результат прогона: **`20 passed in 0.91s`** (все 20 тестов прошли успешно).
+Фактический результат прогона: **`22 passed in 0.9s`** (включая проверку сетевой изоляции `docker-compose.yml` и конфигурации `frontend/nginx.conf`).
 
 ---
 

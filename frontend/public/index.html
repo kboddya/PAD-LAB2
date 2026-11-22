@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShopFlow — Microservices Storefront</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">
+        <span class="brand-badge">SF</span>
+        <div>
+          <h1>ShopFlow</h1>
+          <p class="subtitle">Distributed E-Commerce Microservices UI</p>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button id="btn-check-ready" class="pill-btn" title="Check downstream readiness">
+          <span id="ready-dot" class="dot dot-muted"></span>
+          <span id="ready-label">Checking cluster...</span>
+        </button>
+        <a href="/docs" target="_blank" rel="noopener" class="ghost-btn">API Docs</a>
+        <div id="user-pill" class="user-pill hidden">
+          <span id="user-pill-text"></span>
+          <button id="btn-logout" class="danger-mini">Logout</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container main-grid">
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Degraded Services Alert -->
+    <section id="degraded-banner" class="alert-banner hidden"></section>
+
+    <!-- Navigation Tabs -->
+    <nav class="tabs" aria-label="Primary sections">
+      <button class="tab active" data-tab="catalog">Catalog &amp; Cart <span id="cart-badge" class="badge">0</span></button>
+      <button class="tab" data-tab="dashboard">Dashboard &amp; Orders</button>
+      <button class="tab" data-tab="notifications">Notifications <span id="notif-badge" class="badge">0</span></button>
+      <button class="tab" data-tab="seller" id="tab-seller-btn">Seller Studio</button>
+      <button class="tab" data-tab="cluster">Cluster Health &amp; Trace</button>
+    </nav>
+
+    <div class="layout-columns">
+      <!-- Main Content Area -->
+      <div class="content-area">
+        <!-- Tab 1: Catalog -->
+        <section id="tab-catalog" class="tab-panel active">
+          <div class="panel-header">
+            <h2>Product Catalog</h2>
+            <div class="filters">
+              <input id="search-input" type="search" placeholder="Search products..." />
+              <label class="checkbox-inline">
+                <input id="instock-only" type="checkbox" />
+                In stock only
+              </label>
+              <button id="btn-refresh-products" class="secondary-btn">Refresh</button>
+            </div>
+          </div>
+          <div id="products-grid" class="products-grid"></div>
+        </section>
+
+        <!-- Tab 2: Dashboard & Orders -->
+        <section id="tab-dashboard" class="tab-panel">
+          <div class="panel-header">
+            <h2>Account Dashboard &amp; Orders</h2>
+            <button id="btn-refresh-dashboard" class="secondary-btn">Reload Dashboard</button>
+          </div>
+
+          <div id="dashboard-guest" class="empty-card">
+            Sign in or register on the right panel to view your profile, addresses, and orders.
+          </div>
+
+          <div id="dashboard-content" class="hidden">
+            <div class="stats-row">
+              <div class="stat-card">
+                <span class="stat-label">Profile</span>
+                <strong id="dash-username">-</strong>
+                <span id="dash-tier" class="muted">tier: -</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">Orders</span>
+                <strong id="dash-orders-count">0</strong>
+                <span class="muted">recent activity</span>
+              </div>
+              <div class="stat-card">
+                <span class="stat-label">Unread Alerts</span>
+                <strong id="dash-unread">0</strong>
+                <span id="dash-latency" class="muted">agg: - ms</span>
+              </div>
+            </div>
+
+            <div class="subpanel">
+              <h3>Shipping Addresses</h3>
+              <form id="address-form" class="inline-form">
+                <input name="label" placeholder="Label (Home)" value="Home" required />
+                <input name="country" placeholder="Country" value="Moldova" required />
+                <input name="city" placeholder="City" value="Chisinau" required />
+                <input name="street" placeholder="Street" required />
+                <input name="postal_code" placeholder="Postal code" value="MD-2001" required />
+                <button type="submit" class="primary-btn">Add Address</button>
+              </form>
+              <ul id="addresses-list" class="simple-list"></ul>
+            </div>
+
+            <div class="subpanel">
+              <h3>Recent Orders</h3>
+              <div id="orders-list" class="stack-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab 3: Notifications -->
+        <section id="tab-notifications" class="tab-panel">
+          <div class="panel-header">
+            <h2>Event Notifications</h2>
+            <div class="filters">
+              <label class="checkbox-inline">
+                <input id="unread-only" type="checkbox" />
+                Unread only
+              </label>
+              <button id="btn-mark-all-read" class="secondary-btn">Mark All Read</button>
+              <button id="btn-refresh-notifs" class="secondary-btn">Refresh</button>
+            </div>
+          </div>
+          <div id="notifications-list" class="stack-list"></div>
+        </section>
+
+        <!-- Tab 4: Seller Studio -->
+        <section id="tab-seller" class="tab-panel">
+          <div class="panel-header">
+            <h2>Seller Studio (Create Product)</h2>
+          </div>
+          <p class="muted">Requires an account with role <code>seller</code> or <code>admin</code> (enforced by API Gateway RBAC).</p>
+          <form id="create-product-form" class="card-form">
+            <div class="form-row">
+              <label>SKU <input name="sku" placeholder="SF-KEY-01" required /></label>
+              <label>Category <input name="category" placeholder="peripherals" required /></label>
+            </div>
+            <label>Name <input name="name" placeholder="Mechanical Keyboard" required /></label>
+            <label>Description <textarea name="description" rows="2" placeholder="Compact tactile keyboard"></textarea></label>
+            <div class="form-row">
+              <label>Price (USD) <input name="price" type="number" step="0.01" min="0.01" value="99.00" required /></label>
+              <label>Initial Stock <input name="stock_quantity" type="number" min="0" value="10" required /></label>
+            </div>
+            <button type="submit" class="primary-btn">Publish Product</button>
+          </form>
+        </section>
+
+        <!-- Tab 5: Cluster Health & Trace -->
+        <section id="tab-cluster" class="tab-panel">
+          <div class="panel-header">
+            <h2>Gateway Readiness &amp; Request Trace</h2>
+            <button id="btn-reprobe" class="secondary-btn">Re-probe /ready</button>
+          </div>
+          <div id="cluster-checks" class="checks-grid"></div>
+          <h3 class="mt-lg">Recent API Calls (Gateway Proxy Trace)</h3>
+          <div id="trace-log" class="trace-log"></div>
+        </section>
+      </div>
+
+      <!-- Right Sidebar: Auth + Cart -->
+      <aside class="sidebar">
+        <div id="auth-card" class="side-card">
+          <div class="side-tabs">
+            <button id="mode-login" class="side-tab active">Sign In</button>
+            <button id="mode-register" class="side-tab">Register</button>
+          </div>
+
+          <form id="login-form" class="card-form">
+            <label>Email <input name="email" type="email" placeholder="buyer@shopflow.io" required /></label>
+            <label>Password <input name="password" type="password" placeholder="••••••••" required /></label>
+            <button type="submit" class="primary-btn">Sign In</button>
+          </form>
+
+          <form id="register-form" class="card-form hidden">
+            <label>Email <input name="email" type="email" placeholder="buyer@shopflow.io" required /></label>
+            <label>Username <input name="username" placeholder="alice" minlength="3" required /></label>
+            <label>Full Name <input name="full_name" placeholder="Alice Buyer" /></label>
+            <label>Password <input name="password" type="password" minlength="6" required /></label>
+            <label>Role
+              <select name="role">
+                <option value="customer">customer</option>
+                <option value="seller">seller</option>
+                <option value="admin">admin</option>
+              </select>
+            </label>
+            <button type="submit" class="primary-btn">Create Account</button>
+          </form>
+        </div>
+
+        <div class="side-card">
+          <h3>Shopping Cart</h3>
+          <div id="cart-items" class="cart-items"></div>
+          <div class="cart-summary">
+            <span>Total:</span>
+            <strong id="cart-total">$0.00</strong>
+          </div>
+          <form id="checkout-form" class="card-form">
+            <label>Shipping Address
+              <input id="checkout-address" name="shipping_address" placeholder="Bd. Dacia 24, Chisinau" required />
+            </label>
+            <label class="checkbox-inline">
+              <input id="simulate-failure" type="checkbox" />
+              Simulate payment failure (test Saga rollback)
+            </label>
+            <button type="submit" class="primary-btn" id="btn-checkout">Place Order</button>
+          </form>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+downstream_delay_ms,runs,sequential_avg_ms,parallel_avg_ms,speedup_x
+0,5,2.37,2.97,0.8
+20,5,94.37,29.52,3.2
+50,5,221.77,63.73,3.48
+100,5,421.22,115.69,3.64

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ShopFlow — Microservices Storefront</title>
+  <title>ShopFlow — 12-Microservice Storefront</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -13,7 +13,7 @@
         <span class="brand-badge">SF</span>
         <div>
           <h1>ShopFlow</h1>
-          <p class="subtitle">Distributed E-Commerce Microservices UI</p>
+          <p class="subtitle">Distributed E-Commerce Platform · 12 Microservices</p>
         </div>
       </div>
 
@@ -39,17 +39,18 @@
 
     <!-- Navigation Tabs -->
     <nav class="tabs" aria-label="Primary sections">
-      <button class="tab active" data-tab="catalog">Catalog &amp; Cart <span id="cart-badge" class="badge">0</span></button>
-      <button class="tab" data-tab="dashboard">Dashboard &amp; Orders</button>
+      <button class="tab active" data-tab="catalog">Catalog &amp; Reviews <span id="cart-badge" class="badge">0</span></button>
+      <button class="tab" data-tab="dashboard">Dashboard, Shipments &amp; Promos</button>
       <button class="tab" data-tab="notifications">Notifications <span id="notif-badge" class="badge">0</span></button>
-      <button class="tab" data-tab="seller" id="tab-seller-btn">Seller Studio</button>
+      <button class="tab" data-tab="support">Support &amp; Disputes</button>
+      <button class="tab" data-tab="seller" id="tab-seller-btn">Seller &amp; Analytics Studio</button>
       <button class="tab" data-tab="cluster">Cluster Health &amp; Trace</button>
     </nav>
 
     <div class="layout-columns">
       <!-- Main Content Area -->
       <div class="content-area">
-        <!-- Tab 1: Catalog -->
+        <!-- Tab 1: Catalog & Reviews -->
         <section id="tab-catalog" class="tab-panel active">
           <div class="panel-header">
             <h2>Product Catalog</h2>
@@ -63,36 +64,67 @@
             </div>
           </div>
           <div id="products-grid" class="products-grid"></div>
+
+          <div id="reviews-panel" class="subpanel hidden">
+            <div class="panel-header">
+              <h3 id="reviews-title">Verified Reviews</h3>
+              <button id="btn-close-reviews" class="secondary-btn">Close</button>
+            </div>
+            <div id="reviews-summary" class="muted"></div>
+            <div id="reviews-list" class="stack-list mt-sm"></div>
+            <form id="review-form" class="card-form mt-sm">
+              <div class="form-row">
+                <label>Rating (1-5)
+                  <select name="rating">
+                    <option value="5">5 - Excellent</option>
+                    <option value="4">4 - Good</option>
+                    <option value="3">3 - Average</option>
+                    <option value="2">2 - Poor</option>
+                    <option value="1">1 - Terrible</option>
+                  </select>
+                </label>
+                <label>Title <input name="title" minlength="2" placeholder="Great quality" required /></label>
+              </div>
+              <label>Comment <textarea name="comment" rows="2" minlength="5" placeholder="Share your experience..." required></textarea></label>
+              <button type="submit" class="primary-btn">Submit Verified Review</button>
+            </form>
+          </div>
         </section>
 
-        <!-- Tab 2: Dashboard & Orders -->
+        <!-- Tab 2: Dashboard, Orders, Shipments & Promos -->
         <section id="tab-dashboard" class="tab-panel">
           <div class="panel-header">
-            <h2>Account Dashboard &amp; Orders</h2>
+            <h2>Account Dashboard, Shipments &amp; Promotions</h2>
             <button id="btn-refresh-dashboard" class="secondary-btn">Reload Dashboard</button>
           </div>
 
           <div id="dashboard-guest" class="empty-card">
-            Sign in or register on the right panel to view your profile, addresses, and orders.
+            Sign in or register on the right panel to view your profile, loyalty progress, server cart, shipments, and orders.
           </div>
 
           <div id="dashboard-content" class="hidden">
             <div class="stats-row">
               <div class="stat-card">
-                <span class="stat-label">Profile</span>
+                <span class="stat-label">Profile &amp; Loyalty</span>
                 <strong id="dash-username">-</strong>
                 <span id="dash-tier" class="muted">tier: -</span>
+                <span id="dash-ltv" class="muted">LTV: $0.00</span>
               </div>
               <div class="stat-card">
-                <span class="stat-label">Orders</span>
+                <span class="stat-label">Orders &amp; Shipments</span>
                 <strong id="dash-orders-count">0</strong>
-                <span class="muted">recent activity</span>
+                <span id="dash-shipments-count" class="muted">0 active shipments</span>
               </div>
               <div class="stat-card">
                 <span class="stat-label">Unread Alerts</span>
                 <strong id="dash-unread">0</strong>
                 <span id="dash-latency" class="muted">agg: - ms</span>
               </div>
+            </div>
+
+            <div class="subpanel">
+              <h3>Available Promotions &amp; Personal Coupons</h3>
+              <ul id="promos-list" class="simple-list"></ul>
             </div>
 
             <div class="subpanel">
@@ -109,7 +141,7 @@
             </div>
 
             <div class="subpanel">
-              <h3>Recent Orders</h3>
+              <h3>Recent Orders &amp; Tracking</h3>
               <div id="orders-list" class="stack-list"></div>
             </div>
           </div>
@@ -131,28 +163,84 @@
           <div id="notifications-list" class="stack-list"></div>
         </section>
 
-        <!-- Tab 4: Seller Studio -->
-        <section id="tab-seller" class="tab-panel">
+        <!-- Tab 4: Support & Disputes -->
+        <section id="tab-support" class="tab-panel">
           <div class="panel-header">
-            <h2>Seller Studio (Create Product)</h2>
+            <h2>Support Tickets &amp; Order Disputes</h2>
+            <button id="btn-refresh-tickets" class="secondary-btn">Refresh Tickets</button>
           </div>
-          <p class="muted">Requires an account with role <code>seller</code> or <code>admin</code> (enforced by API Gateway RBAC).</p>
-          <form id="create-product-form" class="card-form">
+          <form id="create-ticket-form" class="card-form">
             <div class="form-row">
-              <label>SKU <input name="sku" placeholder="SF-KEY-01" required /></label>
-              <label>Category <input name="category" placeholder="peripherals" required /></label>
+              <label>Category
+                <select name="category">
+                  <option value="order_issue">order_issue</option>
+                  <option value="refund_request">refund_request</option>
+                  <option value="shipping_delay">shipping_delay</option>
+                  <option value="product_question">product_question</option>
+                </select>
+              </label>
+              <label>Order ID (optional) <input name="order_id" placeholder="UUID of order" /></label>
             </div>
-            <label>Name <input name="name" placeholder="Mechanical Keyboard" required /></label>
-            <label>Description <textarea name="description" rows="2" placeholder="Compact tactile keyboard"></textarea></label>
-            <div class="form-row">
-              <label>Price (USD) <input name="price" type="number" step="0.01" min="0.01" value="99.00" required /></label>
-              <label>Initial Stock <input name="stock_quantity" type="number" min="0" value="10" required /></label>
-            </div>
-            <button type="submit" class="primary-btn">Publish Product</button>
+            <label>Subject <input name="subject" minlength="3" placeholder="Brief summary" required /></label>
+            <label>Message <textarea name="message" rows="2" minlength="5" placeholder="Describe the issue..." required></textarea></label>
+            <button type="submit" class="primary-btn">Open Support Ticket</button>
           </form>
+          <div id="tickets-list" class="stack-list mt-lg"></div>
         </section>
 
-        <!-- Tab 5: Cluster Health & Trace -->
+        <!-- Tab 5: Seller & Analytics Studio -->
+        <section id="tab-seller" class="tab-panel">
+          <div class="panel-header">
+            <h2>Seller &amp; Analytics Studio</h2>
+            <button id="btn-refresh-studio" class="secondary-btn">Refresh Analytics</button>
+          </div>
+          <p class="muted">Requires role <code>seller</code> or <code>admin</code> (enforced by API Gateway RBAC).</p>
+
+          <div id="seller-analytics" class="stats-row mt-sm"></div>
+
+          <div class="form-row mt-sm">
+            <form id="create-product-form" class="card-form side-card">
+              <h3>Publish Product</h3>
+              <div class="form-row">
+                <label>SKU <input name="sku" placeholder="SF-KEY-01" required /></label>
+                <label>Category <input name="category" placeholder="peripherals" required /></label>
+              </div>
+              <label>Name <input name="name" placeholder="Mechanical Keyboard" required /></label>
+              <label>Description <textarea name="description" rows="2" placeholder="Compact tactile keyboard"></textarea></label>
+              <div class="form-row">
+                <label>Price (USD) <input name="price" type="number" step="0.01" min="0.01" value="99.00" required /></label>
+                <label>Initial Stock <input name="stock_quantity" type="number" min="0" value="10" required /></label>
+              </div>
+              <button type="submit" class="primary-btn">Publish Product</button>
+            </form>
+
+            <form id="create-promo-form" class="card-form side-card">
+              <h3>Create Promotion Campaign</h3>
+              <div class="form-row">
+                <label>Code <input name="code" placeholder="SAVE20" required /></label>
+                <label>Type
+                  <select name="discount_type">
+                    <option value="percentage">percentage</option>
+                    <option value="fixed">fixed</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-row">
+                <label>Value <input name="discount_value" type="number" step="0.01" min="0.01" value="15" required /></label>
+                <label>Min Order <input name="min_order_amount" type="number" step="0.01" min="0" value="25" /></label>
+              </div>
+              <label>Description <input name="description" placeholder="15% off orders over $25" /></label>
+              <button type="submit" class="primary-btn">Create Promo</button>
+            </form>
+          </div>
+
+          <div class="subpanel">
+            <h3>Fulfillment Shipments Queue</h3>
+            <div id="studio-shipments-list" class="stack-list"></div>
+          </div>
+        </section>
+
+        <!-- Tab 6: Cluster Health & Trace -->
         <section id="tab-cluster" class="tab-panel">
           <div class="panel-header">
             <h2>Gateway Readiness &amp; Request Trace</h2>
@@ -164,7 +252,7 @@
         </section>
       </div>
 
-      <!-- Right Sidebar: Auth + Cart -->
+      <!-- Right Sidebar: Auth + Server-Synced Cart -->
       <aside class="sidebar">
         <div id="auth-card" class="side-card">
           <div class="side-tabs">
@@ -196,11 +284,28 @@
         <div class="side-card">
           <h3>Shopping Cart</h3>
           <div id="cart-items" class="cart-items"></div>
+
+          <div class="coupon-bar">
+            <input id="coupon-input" placeholder="Promo code (e.g. WELCOME-...)" />
+            <button id="btn-apply-coupon" type="button" class="secondary-btn">Apply</button>
+            <button id="btn-remove-coupon" type="button" class="danger-mini hidden">×</button>
+          </div>
+          <div id="coupon-feedback" class="muted"></div>
+
           <div class="cart-summary">
-            <span>Total:</span>
+            <span>Subtotal / Est.:</span>
             <strong id="cart-total">$0.00</strong>
           </div>
+
           <form id="checkout-form" class="card-form">
+            <label>Shipping Method
+              <select id="shipping-method-select" name="shipping_method">
+                <option value="standard">Standard (4d)</option>
+                <option value="express">Express (1d)</option>
+                <option value="pickup">Pickup ($0.00)</option>
+              </select>
+            </label>
+            <div id="shipping-quote-label" class="muted">Shipping quote: -</div>
             <label>Shipping Address
               <input id="checkout-address" name="shipping_address" placeholder="Bd. Dacia 24, Chisinau" required />
             </label>

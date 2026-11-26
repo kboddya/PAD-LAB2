@@ -1,6 +1,6 @@
 {
   "phase": "after",
-  "timestamp": "2026-11-22T20:38:46.330362+00:00",
+  "timestamp": "2026-11-26T12:44:15.227913+00:00",
   "total_checks": 8,
   "passed": 8,
   "failed": 0,
@@ -29,7 +29,7 @@
       "severity": "High",
       "owasp_category": "API1:2023 Broken Object Level Authorization",
       "status": "PASS",
-      "evidence": "POST /users=401, POST /products/reserve=401, cross-user POST /payments=403",
+      "evidence": "POST /users=401, POST /products/reserve=401, POST /promotions/redeem=401, cross-user POST /payments=403",
       "remediation": "Enforce require_internal_service or caller ownership/admin check on mutation endpoints."
     },
     {

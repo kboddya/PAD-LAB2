@@ -1,7 +1,7 @@
 """Reproducible microservice architecture benchmarks for ShopFlow (Lab2).
 
 Generates measured CSV results in Lab2/experiments/:
-1. results_aggregation.csv      -- Parallel vs sequential API Gateway dashboard aggregation
+1. results_aggregation.csv      -- Parallel vs sequential API Gateway dashboard aggregation (7 services)
 2. results_sync_vs_async.csv    -- Synchronous HTTP fan-out vs asynchronous EventBus choreography
 3. results_rate_limiting.csv    -- Sliding-window rate limiter behavior under burst load
 4. results_fault_tolerance.csv  -- Graceful degradation of /api/dashboard under partial outages
@@ -28,119 +28,21 @@ for rel_path in (
     "services/order-service",
     "services/payment-service",
     "services/notification-service",
+    "services/cart-service",
+    "services/promotion-service",
+    "services/shipping-service",
+    "services/review-service",
+    "services/support-service",
+    "services/analytics-service",
     "gateway",
 ):
     candidate = str(LAB2_ROOT / rel_path)
     if candidate not in sys.path:
         sys.path.insert(0, candidate)
 
-from auth_service.config import AuthSettings  # noqa: E402
-from auth_service.main import create_app as create_auth_app  # noqa: E402
-from gateway_app.config import GatewaySettings  # noqa: E402
-from gateway_app.main import create_app as create_gateway_app  # noqa: E402
-from notification_service.config import NotificationSettings  # noqa: E402
-from notification_service.main import create_app as create_notification_app  # noqa: E402
-from order_service.config import OrderSettings  # noqa: E402
-from order_service.main import create_app as create_order_app  # noqa: E402
-from payment_service.config import PaymentSettings  # noqa: E402
-from payment_service.main import create_app as create_payment_app  # noqa: E402
-from product_service.config import ProductSettings  # noqa: E402
-from product_service.main import create_app as create_product_app  # noqa: E402
-from shared.messaging import InMemoryEventBus  # noqa: E402
-from tests.conftest import ServiceRouterTransport  # noqa: E402
-from user_service.config import UserSettings  # noqa: E402
-from user_service.main import create_app as create_user_app  # noqa: E402
+from tests.conftest import INTERNAL_SERVICE_TOKEN, build_test_cluster  # noqa: E402
 
 EXPERIMENTS_DIR = LAB2_ROOT / "experiments"
-
-
-def _build_silent_cluster(
-    db_dir: Path,
-    *,
-    rate_limit_requests: int = 500,
-    rate_limit_window_seconds: int = 60,
-):
-    bus = InMemoryEventBus()
-    jwt_secret = "benchmark-secret-key-at-least-32-chars"
-
-    apps = {
-        "auth-service": create_auth_app(
-            AuthSettings(
-                database_url=f"sqlite:///{db_dir / 'auth.db'}",
-                rabbitmq_url="memory://",
-                jwt_secret=jwt_secret,
-                log_level="WARNING",
-            ),
-            event_bus=bus,
-        ),
-        "user-service": create_user_app(
-            UserSettings(
-                database_url=f"sqlite:///{db_dir / 'user.db'}",
-                rabbitmq_url="memory://",
-                jwt_secret=jwt_secret,
-                log_level="WARNING",
-            ),
-            event_bus=bus,
-        ),
-        "product-service": create_product_app(
-            ProductSettings(
-                database_url=f"sqlite:///{db_dir / 'product.db'}",
-                rabbitmq_url="memory://",
-                jwt_secret=jwt_secret,
-                log_level="WARNING",
-            ),
-            event_bus=bus,
-        ),
-        "payment-service": create_payment_app(
-            PaymentSettings(
-                database_url=f"sqlite:///{db_dir / 'payment.db'}",
-                rabbitmq_url="memory://",
-                jwt_secret=jwt_secret,
-                log_level="WARNING",
-            ),
-            event_bus=bus,
-        ),
-        "notification-service": create_notification_app(
-            NotificationSettings(
-                database_url=f"sqlite:///{db_dir / 'notification.db'}",
-                rabbitmq_url="memory://",
-                jwt_secret=jwt_secret,
-                log_level="WARNING",
-            ),
-            event_bus=bus,
-        ),
-    }
-
-    transport = ServiceRouterTransport(apps)
-    order_client = httpx.AsyncClient(transport=transport, timeout=5.0)
-    order_app = create_order_app(
-        OrderSettings(
-            database_url=f"sqlite:///{db_dir / 'order.db'}",
-            rabbitmq_url="memory://",
-            jwt_secret=jwt_secret,
-            log_level="WARNING",
-        ),
-        event_bus=bus,
-        http_client=order_client,
-    )
-    apps["order-service"] = order_app
-    transport._transports["order-service"] = httpx.ASGITransport(app=order_app, raise_app_exceptions=False)
-
-    gw_client = httpx.AsyncClient(transport=transport, timeout=5.0)
-    gateway_app = create_gateway_app(
-        GatewaySettings(
-            jwt_secret=jwt_secret,
-            rate_limit_requests=rate_limit_requests,
-            rate_limit_window_seconds=rate_limit_window_seconds,
-            log_level="WARNING",
-        ),
-        http_client=gw_client,
-    )
-    client = httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=gateway_app, raise_app_exceptions=False),
-        base_url="http://api-gateway",
-    )
-    return bus, transport, client, order_client, gw_client
 
 
 def _write_csv(filename: str, fieldnames: list[str], rows: list[dict]) -> Path:
@@ -154,11 +56,20 @@ def _write_csv(filename: str, fieldnames: list[str], rows: list[dict]) -> Path:
 
 
 async def run_aggregation_experiment() -> list[dict]:
-    """Experiment 1: Parallel asyncio.gather vs sequential aggregation across downstream delays."""
+    """Experiment 1: Parallel asyncio.gather vs sequential aggregation across 7 dashboard downstream delays."""
     rows: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp:
-        _, transport, gw, order_c, gw_c = _build_silent_cluster(Path(tmp))
+        cluster = build_test_cluster(
+            Path(tmp),
+            rate_limit_requests=500,
+            rate_limit_window_seconds=60,
+            log_json=False,
+            log_level="WARNING",
+        )
+        seq_client = httpx.AsyncClient(transport=cluster.transport, timeout=5.0)
         try:
+            gw = cluster.gateway_client
+            assert gw is not None
             reg = await gw.post(
                 "/api/auth/register",
                 json={"email": "bench@shop.io", "username": "bench_user", "password": "password123"},
@@ -172,19 +83,29 @@ async def run_aggregation_experiment() -> list[dict]:
                 "order-service",
                 "notification-service",
                 "product-service",
+                "cart-service",
+                "shipping-service",
+                "analytics-service",
             ]
             downstream_urls = [
                 f"http://user-service:8002/users/{user_id}",
                 "http://order-service:8004/orders?limit=10",
                 "http://notification-service:8006/notifications/unread-count",
                 "http://product-service:8003/products?in_stock=true&limit=6",
+                "http://cart-service:8007/cart",
+                "http://shipping-service:8009/shipments?limit=5",
+                "http://analytics-service:8012/analytics/me/summary",
             ]
-            seq_headers = {"X-User-Id": user_id, "X-User-Role": "customer"}
+            seq_headers = {
+                "X-User-Id": user_id,
+                "X-User-Role": "customer",
+                "X-Internal-Token": INTERNAL_SERVICE_TOKEN,
+            }
 
             for delay_ms in (0, 20, 50, 100):
                 delay_sec = delay_ms / 1000.0
                 for host in downstream_hosts:
-                    transport.delays[host] = delay_sec
+                    cluster.transport.delays[host] = delay_sec
 
                 # Warmup
                 await gw.get("/api/dashboard", headers=headers)
@@ -200,7 +121,7 @@ async def run_aggregation_experiment() -> list[dict]:
 
                     t1 = time.perf_counter()
                     for url in downstream_urls:
-                        r = await gw_c.get(url, headers=seq_headers)
+                        r = await seq_client.get(url, headers=seq_headers)
                         assert r.status_code == 200
                     sequential_times.append((time.perf_counter() - t1) * 1000)
 
@@ -217,10 +138,8 @@ async def run_aggregation_experiment() -> list[dict]:
                     }
                 )
         finally:
-            await gw.aclose()
-            await order_c.aclose()
-            await gw_c.aclose()
-            await transport.aclose()
+            await seq_client.aclose()
+            await cluster.aclose()
 
     _write_csv(
         "results_aggregation.csv",
@@ -238,7 +157,6 @@ async def run_sync_vs_async_experiment() -> list[dict]:
     iterations = 10
 
     for num_subscribers in (1, 2, 4, 8):
-        # Mode A: Synchronous sequential HTTP-like fan-out
         sync_latencies: list[float] = []
         for _ in range(iterations):
             t0 = time.perf_counter()
@@ -246,19 +164,15 @@ async def run_sync_vs_async_experiment() -> list[dict]:
                 await asyncio.sleep(handler_delay_sec)
             sync_latencies.append((time.perf_counter() - t0) * 1000)
 
-        # Mode B: Asynchronous decoupled event queue (publisher enqueues, workers consume in background)
         queue: asyncio.Queue[dict] = asyncio.Queue()
-        processed_count = 0
 
         async def _worker() -> None:
-            nonlocal processed_count
             while True:
                 item = await queue.get()
                 if item is None:
                     queue.task_done()
                     break
                 await asyncio.sleep(handler_delay_sec)
-                processed_count += 1
                 queue.task_done()
 
         workers = [asyncio.create_task(_worker()) for _ in range(num_subscribers)]
@@ -311,12 +225,16 @@ async def run_rate_limiting_experiment() -> list[dict]:
 
     for limit in (10, 25, 50, 100):
         with tempfile.TemporaryDirectory() as tmp:
-            _, transport, gw, order_c, gw_c = _build_silent_cluster(
+            cluster = build_test_cluster(
                 Path(tmp),
                 rate_limit_requests=limit,
                 rate_limit_window_seconds=60,
+                log_json=False,
+                log_level="WARNING",
             )
             try:
+                gw = cluster.gateway_client
+                assert gw is not None
                 allowed = 0
                 rejected = 0
                 latencies: list[float] = []
@@ -342,10 +260,7 @@ async def run_rate_limiting_experiment() -> list[dict]:
                     }
                 )
             finally:
-                await gw.aclose()
-                await order_c.aclose()
-                await gw_c.aclose()
-                await transport.aclose()
+                await cluster.aclose()
 
     _write_csv(
         "results_rate_limiting.csv",
@@ -366,8 +281,16 @@ async def run_fault_tolerance_experiment() -> list[dict]:
     """Experiment 4: Graceful degradation of /api/dashboard under partial and critical outages."""
     rows: list[dict] = []
     with tempfile.TemporaryDirectory() as tmp:
-        _, transport, gw, order_c, gw_c = _build_silent_cluster(Path(tmp))
+        cluster = build_test_cluster(
+            Path(tmp),
+            rate_limit_requests=500,
+            rate_limit_window_seconds=60,
+            log_json=False,
+            log_level="WARNING",
+        )
         try:
+            gw = cluster.gateway_client
+            assert gw is not None
             reg = await gw.post(
                 "/api/auth/register",
                 json={"email": "ft@shop.io", "username": "ft_user", "password": "password123"},
@@ -378,18 +301,37 @@ async def run_fault_tolerance_experiment() -> list[dict]:
             scenarios = [
                 ("all_healthy", []),
                 ("notification_down", ["notification-service"]),
-                ("notification_and_order_down", ["notification-service", "order-service"]),
+                ("notification_and_analytics_down", ["notification-service", "analytics-service"]),
+                ("non_critical_4_down", ["notification-service", "cart-service", "shipping-service", "analytics-service"]),
                 (
                     "all_dashboard_downstreams_down",
-                    ["user-service", "order-service", "notification-service", "product-service"],
+                    [
+                        "user-service",
+                        "order-service",
+                        "notification-service",
+                        "product-service",
+                        "cart-service",
+                        "shipping-service",
+                        "analytics-service",
+                    ],
                 ),
                 ("auth_service_down", ["auth-service"]),
             ]
 
+            section_keys = (
+                "profile",
+                "recent_orders",
+                "unread_notifications",
+                "featured_products",
+                "cart",
+                "recent_shipments",
+                "loyalty_summary",
+            )
+
             for scenario_name, down_services in scenarios:
-                transport.faults.clear()
+                cluster.transport.faults.clear()
                 for svc in down_services:
-                    transport.faults[svc] = "connect_error"
+                    cluster.transport.faults[svc] = "connect_error"
 
                 t0 = time.perf_counter()
                 resp = await gw.get("/api/dashboard", headers=headers)
@@ -398,11 +340,7 @@ async def run_fault_tolerance_experiment() -> list[dict]:
                 body = resp.json()
                 degraded = body.get("degraded_services", []) if resp.status_code == 200 else ["auth-service"]
                 available_sections = (
-                    sum(
-                        1
-                        for key in ("profile", "recent_orders", "unread_notifications", "featured_products")
-                        if body.get(key) is not None
-                    )
+                    sum(1 for key in section_keys if body.get(key) is not None)
                     if resp.status_code == 200
                     else 0
                 )
@@ -413,15 +351,12 @@ async def run_fault_tolerance_experiment() -> list[dict]:
                         "down_services": ";".join(down_services) if down_services else "none",
                         "http_status": resp.status_code,
                         "degraded_count": len(degraded),
-                        "available_sections": f"{available_sections}/4",
+                        "available_sections": f"{available_sections}/7",
                         "latency_ms": latency_ms,
                     }
                 )
         finally:
-            await gw.aclose()
-            await order_c.aclose()
-            await gw_c.aclose()
-            await transport.aclose()
+            await cluster.aclose()
 
     _write_csv(
         "results_fault_tolerance.csv",

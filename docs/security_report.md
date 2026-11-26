@@ -1,9 +1,9 @@
 # Отчёт по тестированию безопасности ShopFlow (`Lab2`)
 
-**Методология**: Автоматизированный активный аудит [scripts/security_audit.py](file:///Users/kboddya/Dev/Univ/PAD/Lab2/scripts/security_audit.py) на живом ASGI-кластере (все 6 микросервисов + API Gateway) и аудит конфигурации [frontend/nginx.conf](file:///Users/kboddya/Dev/Univ/PAD/Lab2/frontend/nginx.conf) на базе **OWASP API Security Top 10 (2023)** и Web Hardening.
+**Методология**: Автоматизированный активный аудит [scripts/security_audit.py](file:///Users/kboddya/Dev/Univ/PAD/Lab2/scripts/security_audit.py) на живом ASGI-кластере (**все 12 микросервисов + API Gateway**) и аудит конфигурации [frontend/nginx.conf](file:///Users/kboddya/Dev/Univ/PAD/Lab2/frontend/nginx.conf) на базе **OWASP API Security Top 10 (2023)** и Web Hardening.
 
 - **Замер ДО исправлений** ([security_before.json](file:///Users/kboddya/Dev/Univ/PAD/Lab2/experiments/security_before.json), `2026-11-22T20:35:26Z`): **2/8 PASS, 6 FAIL**
-- **Замер ПОСЛЕ исправлений** ([security_after.json](file:///Users/kboddya/Dev/Univ/PAD/Lab2/experiments/security_after.json), `2026-11-22T20:38:46Z`): **8/8 PASS, 0 FAIL**
+- **Замер ПОСЛЕ исправлений** ([security_after.json](file:///Users/kboddya/Dev/Univ/PAD/Lab2/experiments/security_after.json), `2026-11-26T12:31:47Z`): **8/8 PASS, 0 FAIL**
 
 ---
 
@@ -13,7 +13,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `SEC-01` | Саморегистрация с ролью `admin` (`API5`) | **Critical** | **FAIL** | `POST /api/auth/register` (`role='admin'`) вернул `HTTP 201` | **PASS** | Возвращён `HTTP 422` (публично разрешены только `customer`/`seller`) |
 | `SEC-02` | Спуфинг `X-User-Role: admin` без внутреннего токена (`API2/API5`) | **Critical** | **FAIL** | Прямой `GET /users` с поддельным заголовком вернул `HTTP 200` | **PASS** | Возвращён `HTTP 401` (`X-Internal-Token` обязателен и проверяется через `hmac.compare_digest`) |
-| `SEC-03` | Незащищённые внутренние endpoints и чужие платежи (`API1 BOLA`) | **High** | **FAIL** | `POST /users=201`, `POST /products/reserve=200`, cross-user `POST /payments=201` | **PASS** | `POST /users=401`, `POST /products/reserve=401`, cross-user `POST /payments=403` |
+| `SEC-03` | Незащищённые внутренние endpoints и чужие платежи (`API1 BOLA`) | **High** | **FAIL** | `POST /users=201`, `POST /products/reserve=200`, cross-user `POST /payments=201` | **PASS** | `POST /users=401`, `POST /products/reserve=401`, `POST /promotions/redeem=401`, cross-user `POST /payments=403` |
 | `SEC-04` | Обход Rate Limiter через подмену `X-Forwarded-For` (`API4`) | **High** | **FAIL** | 5 запросов с разным `X-Forwarded-For` дали `[200, 200, 200, 200, 200]` | **PASS** | Недоверенный `X-Forwarded-For` игнорируется (`[200, 200, 200, 429, 429]`) |
 | `SEC-05` | Слабая парольная политика (`password='123456'`) (`API2`) | **Medium** | **FAIL** | Регистрация с `'123456'` прошла (`HTTP 201`) | **PASS** | Отклонено с `HTTP 422` (минимум 8 символов, буква + цифра) |
 | `SEC-06` | Отсутствие security-заголовков на Gateway и NGINX (`API8`) | **Medium** | **FAIL** | `gateway_security_headers=False`, `nginx_hardening=False` | **PASS** | Gateway выставляет `nosniff`, `DENY`, `no-store`; NGINX — `server_tokens off`, `CSP`, `client_max_body_size 1m` |

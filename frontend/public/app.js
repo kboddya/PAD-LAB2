@@ -3,6 +3,8 @@ const state = {
   user: JSON.parse(localStorage.getItem("shopflow_user") || "null"),
   products: [],
   cart: [],
+  serverCart: null,
+  activeReviewProductId: null,
   traces: [],
 };
 
@@ -34,7 +36,7 @@ function recordTrace(method, path, status, reqId, rateRemaining) {
     reqId: reqId || "-",
     rateRemaining: rateRemaining ?? "-",
   });
-  state.traces = state.traces.slice(0, 20);
+  state.traces = state.traces.slice(0, 25);
   renderTraceLog();
 }
 
@@ -76,6 +78,7 @@ function setSession(tokenResponse) {
   } else {
     state.token = null;
     state.user = null;
+    state.serverCart = null;
     localStorage.removeItem("shopflow_token");
     localStorage.removeItem("shopflow_user");
   }
@@ -93,9 +96,16 @@ function syncAuthUI() {
     $("user-pill-text").textContent = `${state.user.username} (${state.user.role})`;
     loadDashboard();
     loadNotifications();
+    loadServerCart();
+    loadTickets();
+    if (state.user.role === "seller" || state.user.role === "admin") {
+      loadSellerStudio();
+    }
   } else {
     $("notif-badge").textContent = "0";
     $("notifications-list").innerHTML = `<div class="empty-card">Sign in to view notifications.</div>`;
+    $("tickets-list").innerHTML = `<div class="empty-card">Sign in to manage support tickets.</div>`;
+    renderCart();
   }
 }
 
@@ -104,9 +114,10 @@ async function checkClusterReady() {
     const resp = await fetch("/ready");
     const data = await resp.json();
     const checks = data.checks || {};
+    const count = Object.keys(checks).length;
     const allOk = resp.ok && data.status === "ready";
     $("ready-dot").className = `dot ${allOk ? "dot-ok" : "dot-warn"}`;
-    $("ready-label").textContent = allOk ? "All 6 services ready" : "Cluster degraded";
+    $("ready-label").textContent = allOk ? `All ${count} services ready` : "Cluster degraded";
     renderClusterChecks(checks);
   } catch {
     $("ready-dot").className = "dot dot-err";
@@ -167,22 +178,113 @@ function renderProducts() {
     .map(
       (p) => `
       <article class="product-card">
-        <div class="sku-tag">${esc(p.sku)} · ${esc(p.category)}</div>
+        <div class="price-row">
+          <span class="sku-tag">${esc(p.sku)} · ${esc(p.category)}</span>
+          <span class="rating-pill">★ ${Number(p.average_rating || 0).toFixed(1)} (${Number(p.review_count || 0)})</span>
+        </div>
         <h3>${esc(p.name)}</h3>
         <p class="muted">${esc(p.description || "No description")}</p>
         <div class="muted">Available: <strong>${Number(p.available_quantity)}</strong> (reserved: ${Number(p.reserved_quantity)})</div>
         <div class="price-row">
           <span class="price">$${Number(p.price).toFixed(2)}</span>
-          <button class="secondary-btn" data-action="add-to-cart" data-id="${esc(p.id)}" ${p.available_quantity <= 0 ? "disabled" : ""}>
-            ${p.available_quantity > 0 ? "Add to Cart" : "Out of stock"}
-          </button>
+          <div class="card-actions">
+            <button class="secondary-btn" data-action="view-reviews" data-id="${esc(p.id)}" data-name="${esc(p.name)}">Reviews</button>
+            <button class="secondary-btn" data-action="add-to-cart" data-id="${esc(p.id)}" ${p.available_quantity <= 0 ? "disabled" : ""}>
+              ${p.available_quantity > 0 ? "Add" : "Out"}
+            </button>
+          </div>
         </div>
       </article>`
     )
     .join("");
 }
 
-window.addToCart = (productId) => {
+async function openReviews(productId, productName) {
+  state.activeReviewProductId = productId;
+  $("reviews-title").textContent = `Verified Reviews · ${productName || productId}`;
+  $("reviews-panel").classList.remove("hidden");
+  await refreshActiveReviews();
+}
+
+async function refreshActiveReviews() {
+  if (!state.activeReviewProductId) return;
+  try {
+    const [summary, reviews] = await Promise.all([
+      apiFetch(`/api/reviews/product/${state.activeReviewProductId}/summary`),
+      apiFetch(`/api/reviews?product_id=${encodeURIComponent(state.activeReviewProductId)}`),
+    ]);
+    $("reviews-summary").textContent = `Average: ${Number(summary.average_rating).toFixed(2)} / 5 across ${Number(summary.review_count)} verified review(s)`;
+    $("reviews-list").innerHTML = reviews.length
+      ? reviews
+          .map(
+            (r) => `
+          <div class="order-card">
+            <div class="price-row">
+              <strong>${esc(r.title)} · ★ ${Number(r.rating)}/5</strong>
+              <button class="secondary-btn" data-action="vote-helpful" data-id="${esc(r.id)}">Helpful (${Number(r.helpful_count)})</button>
+            </div>
+            <div class="muted">${esc(r.comment)}</div>
+            ${r.seller_reply ? `<div class="muted mt-sm">Seller reply: ${esc(r.seller_reply)}</div>` : ""}
+          </div>`
+          )
+          .join("")
+      : `<div class="empty-card">No verified reviews yet.</div>`;
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+async function loadServerCart() {
+  if (!state.token) return;
+  try {
+    state.serverCart = await apiFetch("/api/cart");
+    renderCart();
+  } catch (err) {
+    showToast(`Cart sync error: ${err.message}`, true);
+  }
+}
+
+async function refreshShippingQuote() {
+  const method = $("shipping-method-select").value;
+  let itemsCount = 1;
+  let subtotal = 0;
+  if (state.token && state.serverCart) {
+    itemsCount = Math.max(1, Number(state.serverCart.items_count || 0));
+    subtotal = Number(state.serverCart.subtotal || 0);
+  } else {
+    itemsCount = Math.max(1, state.cart.reduce((acc, c) => acc + c.quantity, 0));
+    subtotal = state.cart.reduce((acc, c) => acc + c.quantity * c.product.price, 0);
+  }
+  try {
+    const quote = await apiFetch("/api/shipping/quotes", {
+      method: "POST",
+      body: JSON.stringify({
+        shipping_method: method,
+        items_count: itemsCount,
+        order_subtotal: subtotal,
+      }),
+    });
+    $("shipping-quote-label").textContent = `Quote: $${Number(quote.cost).toFixed(2)} (${quote.carrier}, ~${quote.estimated_days}d)`;
+  } catch {
+    $("shipping-quote-label").textContent = "Shipping quote unavailable";
+  }
+}
+
+window.addToCart = async (productId) => {
+  if (state.token) {
+    try {
+      state.serverCart = await apiFetch("/api/cart/items", {
+        method: "POST",
+        body: JSON.stringify({ product_id: productId, quantity: 1 }),
+      });
+      renderCart();
+      showToast("Added to server cart");
+    } catch (err) {
+      showToast(err.message, true);
+    }
+    return;
+  }
+
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
   const existing = state.cart.find((c) => c.product.id === productId);
@@ -199,39 +301,94 @@ window.addToCart = (productId) => {
   renderCart();
 };
 
-window.removeFromCart = (productId) => {
+window.removeFromCart = async (productId) => {
+  if (state.token) {
+    try {
+      state.serverCart = await apiFetch(`/api/cart/items/${productId}`, { method: "DELETE" });
+      renderCart();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+    return;
+  }
   state.cart = state.cart.filter((c) => c.product.id !== productId);
   renderCart();
 };
 
 function renderCart() {
+  if (state.token && state.serverCart) {
+    const c = state.serverCart;
+    $("cart-badge").textContent = String(c.items_count || 0);
+    $("cart-total").textContent =
+      c.discount_amount > 0
+        ? `$${Number(c.subtotal).toFixed(2)} → $${Number(c.estimated_total).toFixed(2)}`
+        : `$${Number(c.subtotal || 0).toFixed(2)}`;
+
+    if (c.coupon_code) {
+      $("coupon-input").value = c.coupon_code;
+      $("btn-remove-coupon").classList.remove("hidden");
+      $("coupon-feedback").textContent = c.coupon_valid
+        ? `Coupon ${c.coupon_code}: -$${Number(c.discount_amount).toFixed(2)}`
+        : `Coupon ${c.coupon_code}: ${c.coupon_message || "not valid"}`;
+    } else {
+      $("btn-remove-coupon").classList.add("hidden");
+      $("coupon-feedback").textContent = "";
+    }
+
+    if (!c.items || !c.items.length) {
+      $("cart-items").innerHTML = `<div class="muted">Cart is empty.</div>`;
+    } else {
+      $("cart-items").innerHTML = c.items
+        .map(
+          (item) => `
+          <div class="cart-row">
+            <span>${esc(item.product_name)} × ${Number(item.quantity)}${item.price_changed ? " (price updated)" : ""}</span>
+            <span>
+              $${Number(item.line_total).toFixed(2)}
+              <button class="danger-mini" data-action="remove-from-cart" data-id="${esc(item.product_id)}">×</button>
+            </span>
+          </div>`
+        )
+        .join("");
+    }
+    refreshShippingQuote();
+    return;
+  }
+
   const totalCount = state.cart.reduce((acc, item) => acc + item.quantity, 0);
   const totalSum = state.cart.reduce((acc, item) => acc + item.quantity * item.product.price, 0);
   $("cart-badge").textContent = String(totalCount);
   $("cart-total").textContent = `$${totalSum.toFixed(2)}`;
+  $("btn-remove-coupon").classList.add("hidden");
+  $("coupon-feedback").textContent = "";
 
   if (!state.cart.length) {
     $("cart-items").innerHTML = `<div class="muted">Cart is empty.</div>`;
-    return;
+  } else {
+    $("cart-items").innerHTML = state.cart
+      .map(
+        (c) => `
+        <div class="cart-row">
+          <span>${esc(c.product.name)} × ${Number(c.quantity)}</span>
+          <span>
+            $${(c.quantity * c.product.price).toFixed(2)}
+            <button class="danger-mini" data-action="remove-from-cart" data-id="${esc(c.product.id)}">×</button>
+          </span>
+        </div>`
+      )
+      .join("");
   }
-  $("cart-items").innerHTML = state.cart
-    .map(
-      (c) => `
-      <div class="cart-row">
-        <span>${esc(c.product.name)} × ${Number(c.quantity)}</span>
-        <span>
-          $${(c.quantity * c.product.price).toFixed(2)}
-          <button class="danger-mini" data-action="remove-from-cart" data-id="${esc(c.product.id)}">×</button>
-        </span>
-      </div>`
-    )
-    .join("");
+  refreshShippingQuote();
 }
 
 async function loadDashboard() {
   if (!state.token) return;
   try {
-    const dash = await apiFetch("/api/dashboard");
+    const [dash, promos] = await Promise.all([
+      apiFetch("/api/dashboard"),
+      apiFetch("/api/promotions").catch(() => []),
+    ]);
+
     const banner = $("degraded-banner");
     if (dash.degraded_services && dash.degraded_services.length) {
       banner.textContent = `Partial degradation detected: ${dash.degraded_services.join(", ")}`;
@@ -242,14 +399,32 @@ async function loadDashboard() {
 
     $("dash-username").textContent = dash.profile?.full_name || state.user.username;
     $("dash-tier").textContent = `tier: ${dash.profile?.loyalty_tier || "-"}`;
+    const ltv = dash.loyalty_summary;
+    $("dash-ltv").textContent = ltv
+      ? `Net Spend: $${Number(ltv.net_spend).toFixed(2)}${ltv.next_tier ? ` ($${Number(ltv.amount_to_next_tier).toFixed(2)} to ${ltv.next_tier})` : " (MAX)"}`
+      : "LTV unavailable";
+
     const orders = dash.recent_orders || [];
+    const shipments = dash.recent_shipments || [];
+    const shipmentsByOrder = Object.fromEntries(shipments.map((s) => [s.order_id, s]));
+
     $("dash-orders-count").textContent = String(orders.length);
+    $("dash-shipments-count").textContent = `${shipments.length} shipment(s)`;
     $("dash-unread").textContent = String(dash.unread_notifications ?? "-");
     $("dash-latency").textContent = `agg: ${dash.aggregation_latency_ms} ms`;
 
     if (dash.unread_notifications !== null && dash.unread_notifications !== undefined) {
       $("notif-badge").textContent = String(dash.unread_notifications);
     }
+
+    $("promos-list").innerHTML = promos.length
+      ? promos
+          .map(
+            (p) =>
+              `<li><strong>${esc(p.code)}</strong> — ${p.discount_type === "percentage" ? `${Number(p.discount_value)}% off` : `$${Number(p.discount_value)} off`} (min $${Number(p.min_order_amount).toFixed(2)}, tier: ${esc(p.required_tier)}) · ${esc(p.description)}</li>`
+          )
+          .join("")
+      : `<li class="muted">No active promotions right now.</li>`;
 
     const addrs = dash.profile?.addresses || [];
     $("addresses-list").innerHTML = addrs.length
@@ -268,14 +443,16 @@ async function loadDashboard() {
 
     $("orders-list").innerHTML = orders.length
       ? orders
-          .map(
-            (o) => `
+          .map((o) => {
+            const ship = shipmentsByOrder[o.id];
+            return `
           <div class="order-card">
             <div class="price-row">
               <strong>Order ${esc(o.id.slice(0, 8))}...</strong>
               <span class="status-badge status-${esc(o.status)}">${esc(o.status)}</span>
             </div>
-            <div class="muted">Total: $${Number(o.total_amount).toFixed(2)} ${esc(o.currency)} · ${esc(o.shipping_address)}</div>
+            <div class="muted">Total: $${Number(o.total_amount).toFixed(2)} ${esc(o.currency)}${o.discount_amount > 0 ? ` (discount -$${Number(o.discount_amount).toFixed(2)})` : ""}${o.shipping_cost > 0 ? ` (+ship $${Number(o.shipping_cost).toFixed(2)})` : ""} · ${esc(o.shipping_address)}</div>
+            ${ship ? `<div class="muted">Tracking: <strong>${esc(ship.tracking_number)}</strong> (${esc(ship.carrier)} · ${esc(ship.status)})</div>` : ""}
             ${o.failure_reason ? `<div class="muted">Reason: ${esc(o.failure_reason)}</div>` : ""}
             <div class="price-row">
               <span class="muted">${o.items.map((i) => `${esc(i.product_name)} × ${Number(i.quantity)}`).join(", ")}</span>
@@ -285,8 +462,8 @@ async function loadDashboard() {
                   : ""
               }
             </div>
-          </div>`
-          )
+          </div>`;
+          })
           .join("")
       : `<div class="empty-card">No orders placed yet.</div>`;
   } catch (err) {
@@ -294,10 +471,78 @@ async function loadDashboard() {
   }
 }
 
+async function loadTickets() {
+  if (!state.token) return;
+  try {
+    const tickets = await apiFetch("/api/support/tickets");
+    const isAdmin = state.user?.role === "admin";
+    $("tickets-list").innerHTML = tickets.length
+      ? tickets
+          .map(
+            (t) => `
+          <div class="order-card">
+            <div class="price-row">
+              <strong>${esc(t.subject)} <span class="sku-tag">[${esc(t.category)} · ${esc(t.priority)}]</span></strong>
+              <span class="status-badge status-${esc(t.status)}">${esc(t.status)}</span>
+            </div>
+            <div class="muted">Order: ${esc(t.order_id || "-")} · SLA: ${Number(t.sla_hours)}h${t.refund_amount ? ` · Refunded: $${Number(t.refund_amount).toFixed(2)}` : ""}</div>
+            <div class="muted mt-sm">${(t.messages || []).map((m) => `<div><strong>${esc(m.author_role)}:</strong> ${esc(m.message)}</div>`).join("")}</div>
+            ${
+              isAdmin && t.order_id && t.status !== "resolved" && t.status !== "closed"
+                ? `<div class="price-row"><button class="secondary-btn" data-action="approve-refund" data-id="${esc(t.id)}">Approve &amp; Refund</button></div>`
+                : ""
+            }
+          </div>`
+          )
+          .join("")
+      : `<div class="empty-card">No support tickets yet.</div>`;
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
+async function loadSellerStudio() {
+  if (!state.token || (state.user?.role !== "seller" && state.user?.role !== "admin")) return;
+  try {
+    const [overview, shipments] = await Promise.all([
+      apiFetch("/api/analytics/overview"),
+      apiFetch("/api/shipments?limit=20"),
+    ]);
+    $("seller-analytics").innerHTML = `
+      <div class="stat-card"><span class="stat-label">GMV / Net Revenue</span><strong>$${Number(overview.gross_revenue).toFixed(2)}</strong><span class="muted">Net: $${Number(overview.net_revenue).toFixed(2)} (Refunds: $${Number(overview.refunds_total).toFixed(2)})</span></div>
+      <div class="stat-card"><span class="stat-label">Orders Paid / Created</span><strong>${Number(overview.orders_paid)} / ${Number(overview.orders_created)}</strong><span class="muted">AOV: $${Number(overview.average_order_value).toFixed(2)}</span></div>
+      <div class="stat-card"><span class="stat-label">Payment Success Rate</span><strong>${Number(overview.payment_success_rate_pct).toFixed(1)}%</strong><span class="muted">Delivered: ${Number(overview.shipments_delivered)}</span></div>
+    `;
+
+    $("studio-shipments-list").innerHTML = shipments.length
+      ? shipments
+          .map(
+            (s) => `
+          <div class="order-card">
+            <div class="price-row">
+              <strong>${esc(s.tracking_number)} · Order ${esc(s.order_id.slice(0, 8))}...</strong>
+              <span class="status-badge status-${esc(s.status)}">${esc(s.status)}</span>
+            </div>
+            <div class="price-row">
+              <span class="muted">${esc(s.carrier)} (${esc(s.shipping_method)})</span>
+              <div class="card-actions">
+                ${s.status === "preparing" ? `<button class="secondary-btn" data-action="advance-shipment" data-id="${esc(s.id)}" data-status="dispatched">Dispatch</button>` : ""}
+                ${s.status === "dispatched" || s.status === "in_transit" ? `<button class="secondary-btn" data-action="advance-shipment" data-id="${esc(s.id)}" data-status="delivered">Mark Delivered</button>` : ""}
+              </div>
+            </div>
+          </div>`
+          )
+          .join("")
+      : `<div class="empty-card">No shipments in queue.</div>`;
+  } catch (err) {
+    showToast(err.message, true);
+  }
+}
+
 window.cancelOrder = async (orderId) => {
   try {
     await apiFetch(`/api/orders/${orderId}/cancel`, { method: "POST" });
-    showToast("Order cancelled & inventory restored via Saga");
+    showToast("Order cancelled & inventory/coupon restored via Saga");
     await Promise.all([loadDashboard(), loadProducts(), loadNotifications()]);
   } catch (err) {
     showToast(err.message, true);
@@ -346,14 +591,42 @@ window.markNotificationRead = async (id) => {
 };
 
 function setupEvents() {
-  document.addEventListener("click", (e) => {
+  document.addEventListener("click", async (e) => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
-    const { action, id } = btn.dataset;
+    const { action, id, name, status } = btn.dataset;
     if (action === "add-to-cart") window.addToCart(id);
     else if (action === "remove-from-cart") window.removeFromCart(id);
     else if (action === "cancel-order") window.cancelOrder(id);
     else if (action === "mark-notif-read") window.markNotificationRead(id);
+    else if (action === "view-reviews") openReviews(id, name);
+    else if (action === "vote-helpful") {
+      try {
+        await apiFetch(`/api/reviews/${id}/helpful`, { method: "POST" });
+        await refreshActiveReviews();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    } else if (action === "advance-shipment") {
+      try {
+        await apiFetch(`/api/shipments/${id}/status`, {
+          method: "POST",
+          body: JSON.stringify({ status, location: "Chisinau Hub" }),
+        });
+        showToast(`Shipment marked as ${status}`);
+        await Promise.all([loadSellerStudio(), loadDashboard(), loadNotifications()]);
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    } else if (action === "approve-refund") {
+      try {
+        await apiFetch(`/api/support/tickets/${id}/approve-refund`, { method: "POST", body: JSON.stringify({}) });
+        showToast("Refund approved and processed");
+        await Promise.all([loadTickets(), loadDashboard(), loadNotifications()]);
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
   });
 
   document.querySelectorAll(".tab").forEach((btn) => {
@@ -403,7 +676,7 @@ function setupEvents() {
         body: JSON.stringify(Object.fromEntries(form)),
       });
       setSession(data);
-      showToast(`Registered as ${data.user.role}!`);
+      showToast(`Registered as ${data.user.role}! Welcome coupon provisioned.`);
     } catch (err) {
       showToast(err.message, true);
     }
@@ -419,31 +692,110 @@ function setupEvents() {
     showToast("Logged out and JWT revoked");
   });
 
+  $("btn-apply-coupon").addEventListener("click", async () => {
+    if (!state.token) {
+      showToast("Sign in to apply a coupon", true);
+      return;
+    }
+    const code = $("coupon-input").value.trim();
+    if (!code) return;
+    try {
+      state.serverCart = await apiFetch("/api/cart/coupon", {
+        method: "POST",
+        body: JSON.stringify({ code }),
+      });
+      renderCart();
+      showToast(`Coupon ${code.toUpperCase()} applied`);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  });
+
+  $("btn-remove-coupon").addEventListener("click", async () => {
+    if (!state.token) return;
+    try {
+      state.serverCart = await apiFetch("/api/cart/coupon", { method: "DELETE" });
+      $("coupon-input").value = "";
+      renderCart();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  });
+
+  $("shipping-method-select").addEventListener("change", refreshShippingQuote);
+
   $("checkout-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!state.token) {
       showToast("Please sign in before placing an order", true);
       return;
     }
-    if (!state.cart.length) {
+    const hasServerItems = Boolean(state.serverCart && state.serverCart.items && state.serverCart.items.length);
+    if (!hasServerItems) {
       showToast("Your cart is empty", true);
       return;
     }
     try {
-      const order = await apiFetch("/api/orders", {
+      const order = await apiFetch("/api/cart/checkout", {
         method: "POST",
         body: JSON.stringify({
-          items: state.cart.map((c) => ({ product_id: c.product.id, quantity: c.quantity })),
           shipping_address: $("checkout-address").value.trim(),
+          shipping_method: $("shipping-method-select").value,
           simulate_payment_failure: $("simulate-failure").checked,
         }),
       });
-      state.cart = [];
-      renderCart();
       showToast(`Order ${order.status}: #${order.id.slice(0, 8)}`);
-      await Promise.all([loadProducts(), loadDashboard(), loadNotifications()]);
+      await Promise.all([loadServerCart(), loadProducts(), loadDashboard(), loadNotifications()]);
     } catch (err) {
       showToast(`Checkout failed: ${err.message}`, true);
+    }
+  });
+
+  $("review-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!state.activeReviewProductId) return;
+    const raw = Object.fromEntries(new FormData(e.target));
+    try {
+      await apiFetch("/api/reviews", {
+        method: "POST",
+        body: JSON.stringify({
+          product_id: state.activeReviewProductId,
+          rating: Number(raw.rating),
+          title: raw.title,
+          comment: raw.comment,
+        }),
+      });
+      e.target.reset();
+      showToast("Verified review published");
+      await Promise.all([refreshActiveReviews(), loadProducts()]);
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  });
+
+  $("btn-close-reviews").addEventListener("click", () => {
+    $("reviews-panel").classList.add("hidden");
+    state.activeReviewProductId = null;
+  });
+
+  $("create-ticket-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!state.token) {
+      showToast("Sign in to open a support ticket", true);
+      return;
+    }
+    const raw = Object.fromEntries(new FormData(e.target));
+    if (!raw.order_id) delete raw.order_id;
+    try {
+      const created = await apiFetch("/api/support/tickets", {
+        method: "POST",
+        body: JSON.stringify(raw),
+      });
+      e.target.reset();
+      showToast(`Ticket opened (priority: ${created.priority}, SLA: ${created.sla_hours}h)`);
+      loadTickets();
+    } catch (err) {
+      showToast(err.message, true);
     }
   });
 
@@ -483,11 +835,31 @@ function setupEvents() {
     }
   });
 
+  $("create-promo-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const raw = Object.fromEntries(new FormData(e.target));
+    raw.discount_value = Number(raw.discount_value);
+    raw.min_order_amount = Number(raw.min_order_amount || 0);
+    try {
+      const created = await apiFetch("/api/promotions", {
+        method: "POST",
+        body: JSON.stringify(raw),
+      });
+      e.target.reset();
+      showToast(`Promotion ${created.code} created`);
+      loadDashboard();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  });
+
   $("btn-refresh-products").addEventListener("click", loadProducts);
   $("search-input").addEventListener("input", () => loadProducts());
   $("instock-only").addEventListener("change", loadProducts);
   $("btn-refresh-dashboard").addEventListener("click", loadDashboard);
   $("btn-refresh-notifs").addEventListener("click", loadNotifications);
+  $("btn-refresh-tickets").addEventListener("click", loadTickets);
+  $("btn-refresh-studio").addEventListener("click", loadSellerStudio);
   $("unread-only").addEventListener("change", loadNotifications);
   $("btn-mark-all-read").addEventListener("click", async () => {
     if (!state.token) return;

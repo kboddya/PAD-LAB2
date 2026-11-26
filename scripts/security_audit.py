@@ -26,6 +26,12 @@ for rel_path in (
     "services/order-service",
     "services/payment-service",
     "services/notification-service",
+    "services/cart-service",
+    "services/promotion-service",
+    "services/shipping-service",
+    "services/review-service",
+    "services/support-service",
+    "services/analytics-service",
     "gateway",
 ):
     candidate = str(LAB2_ROOT / rel_path)
@@ -58,6 +64,7 @@ async def run_audit() -> list[SecurityFinding]:
             users = cluster.service_clients["user-service"]
             products = cluster.service_clients["product-service"]
             payments = cluster.service_clients["payment-service"]
+            promotions = cluster.service_clients["promotion-service"]
 
             # Seed one legitimate seller and product for BOLA / injection tests
             seller_reg = await gw.post(
@@ -143,6 +150,10 @@ async def run_audit() -> list[SecurityFinding]:
                 f"/products/{seller_prod['id']}/reserve",
                 json={"quantity": 2, "order_id": "forged-ord"},
             )
+            unauth_promo_redeem = await promotions.post(
+                "/promotions/redeem",
+                json={"order_id": "forged-o", "user_id": "forged-u", "code": "VIP20", "order_subtotal": 50.0},
+            )
             victim_token = victim_reg.json()["access_token"]
             cross_pay = await payments.post(
                 "/payments",
@@ -152,6 +163,7 @@ async def run_audit() -> list[SecurityFinding]:
             sec03_pass = (
                 unauth_user_create.status_code in (401, 403)
                 and unauth_reserve.status_code in (401, 403)
+                and unauth_promo_redeem.status_code in (401, 403)
                 and cross_pay.status_code in (401, 403)
             )
             findings.append(
@@ -164,6 +176,7 @@ async def run_audit() -> list[SecurityFinding]:
                     evidence=(
                         f"POST /users={unauth_user_create.status_code}, "
                         f"POST /products/reserve={unauth_reserve.status_code}, "
+                        f"POST /promotions/redeem={unauth_promo_redeem.status_code}, "
                         f"cross-user POST /payments={cross_pay.status_code}"
                     ),
                     remediation="Enforce require_internal_service or caller ownership/admin check on mutation endpoints.",

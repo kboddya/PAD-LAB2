@@ -23,6 +23,12 @@ def test_docker_compose_exposes_only_frontend_port() -> None:
         "order-service",
         "payment-service",
         "notification-service",
+        "cart-service",
+        "promotion-service",
+        "shipping-service",
+        "review-service",
+        "support-service",
+        "analytics-service",
         "api-gateway",
         "frontend",
     }

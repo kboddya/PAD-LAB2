@@ -1,10 +1,10 @@
-"""End-to-end tests exercising all 6 microservices + API Gateway together."""
+"""End-to-end tests exercising all 12 microservices + API Gateway together."""
 
 from __future__ import annotations
 
 import pytest
 
-from tests.conftest import register_user_via_gateway
+from tests.conftest import internal_headers, register_user_via_gateway
 
 
 @pytest.mark.asyncio
@@ -12,10 +12,10 @@ async def test_full_ecommerce_purchase_saga_and_cancellation_e2e(cluster) -> Non
     gw = cluster.gateway_client
     assert gw is not None
 
-    # 1. Gateway /ready confirms all 6 downstream services are healthy
+    # 1. Gateway /ready confirms all 12 downstream services are healthy
     ready = await gw.get("/ready")
     assert ready.status_code == 200
-    assert len(ready.json()["checks"]) == 6
+    assert len(ready.json()["checks"]) == 12
 
     # 2. Register seller and publish catalog items
     seller = await register_user_via_gateway(
@@ -156,3 +156,137 @@ async def test_full_ecommerce_purchase_saga_and_cancellation_e2e(cluster) -> Non
     assert logout.status_code == 200
     after_logout = await gw.get("/api/dashboard", headers=cust_hdr)
     assert after_logout.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_extended_12_microservice_commerce_lifecycle_e2e(cluster) -> None:
+    """Exercise all 12 microservices in one integrated commerce & post-order lifecycle."""
+    gw = cluster.gateway_client
+    support_client = cluster.service_clients["support-service"]
+    assert gw is not None
+
+    seller = await register_user_via_gateway(gw, email="e2e_s@shopflow.io", username="e2e_seller", role="seller")
+    buyer = await register_user_via_gateway(gw, email="e2e_b@shopflow.io", username="e2e_buyer", role="customer")
+    s_hdr = {"Authorization": f"Bearer {seller['access_token']}"}
+    b_hdr = {"Authorization": f"Bearer {buyer['access_token']}"}
+
+    # 1. Seller publishes product & creates promo; buyer receives personal welcome coupon
+    laptop = (
+        await gw.post(
+            "/api/products",
+            headers=s_hdr,
+            json={"sku": "E2E-PRO-1", "name": "Pro Laptop X", "category": "laptops", "price": 1200.0, "stock_quantity": 2},
+        )
+    ).json()
+
+    await gw.post(
+        "/api/promotions",
+        headers=s_hdr,
+        json={
+            "code": "VIP20",
+            "description": "20% off laptops (max $250)",
+            "discount_type": "percentage",
+            "discount_value": 20.0,
+            "min_order_amount": 100.0,
+            "max_discount_amount": 250.0,
+            "max_uses": 1,
+        },
+    )
+    promos = (await gw.get("/api/promotions", headers=b_hdr)).json()
+    assert any(p["code"].startswith("WELCOME-") for p in promos)
+
+    # 2. Cart + Coupon + Shipping Quote
+    await gw.post("/api/cart/items", headers=b_hdr, json={"product_id": laptop["id"], "quantity": 1})
+    cart = (await gw.post("/api/cart/coupon", headers=b_hdr, json={"code": "VIP20"})).json()
+    assert cart["discount_amount"] == 240.0
+    assert cart["estimated_total"] == 960.0
+
+    quote = (
+        await gw.post(
+            "/api/shipping/quotes",
+            json={"shipping_method": "express", "items_count": 1, "order_subtotal": 1200.0, "loyalty_tier": "standard"},
+        )
+    ).json()
+    assert quote["cost"] == 19.99
+
+    # 3. Checkout failure rolls back BOTH stock and VIP20 promo quota, keeping cart
+    failed = await gw.post(
+        "/api/cart/checkout",
+        headers=b_hdr,
+        json={"shipping_address": "100 Main Ave", "shipping_method": "express", "simulate_payment_failure": True},
+    )
+    assert failed.status_code == 201
+    assert failed.json()["status"] == "payment_failed"
+    assert (await gw.get(f"/api/products/{laptop['id']}")).json()["stock_quantity"] == 2
+
+    # 4. Successful checkout clears cart, creates shipment, and auto-upgrades loyalty tier to silver
+    paid = (
+        await gw.post(
+            "/api/cart/checkout",
+            headers=b_hdr,
+            json={"shipping_address": "100 Main Ave", "shipping_method": "express"},
+        )
+    ).json()
+    assert paid["status"] == "paid"
+    assert paid["total_amount"] == 979.99
+    assert (await gw.get("/api/cart", headers=b_hdr)).json()["items_count"] == 0
+    assert (await gw.get(f"/api/users/{buyer['user']['id']}", headers=b_hdr)).json()["loyalty_tier"] == "silver"
+
+    # 5. Fulfillment delivery advances order to delivered
+    shipment = (await gw.get(f"/api/shipments/by-order/{paid['id']}", headers=b_hdr)).json()
+    await gw.post(
+        f"/api/shipments/{shipment['id']}/status",
+        headers=s_hdr,
+        json={"status": "dispatched", "location": "Central Hub"},
+    )
+    await gw.post(
+        f"/api/shipments/{shipment['id']}/status",
+        headers=s_hdr,
+        json={"status": "delivered", "location": "100 Main Ave"},
+    )
+    assert (await gw.get(f"/api/orders/{paid['id']}", headers=b_hdr)).json()["status"] == "delivered"
+
+    # 6. Verified purchase review updates product rating
+    rev = await gw.post(
+        "/api/reviews",
+        headers=b_hdr,
+        json={"product_id": laptop["id"], "rating": 5, "title": "Blazing fast", "comment": "Worth every cent!"},
+    )
+    assert rev.status_code == 201
+    assert (await gw.get(f"/api/products/{laptop['id']}")).json()["average_rating"] == 5.0
+
+    # 7. Support dispute -> admin refund approval -> analytics reflects refund
+    ticket = (
+        await gw.post(
+            "/api/support/tickets",
+            headers=b_hdr,
+            json={
+                "order_id": paid["id"],
+                "category": "refund_request",
+                "subject": "Return request",
+                "message": "Found dead pixel after delivery, requesting refund.",
+            },
+        )
+    ).json()
+    assert ticket["priority"] == "urgent"
+
+    approved = await support_client.post(
+        f"/support/tickets/{ticket['id']}/approve-refund",
+        headers=internal_headers("admin-1", "admin"),
+        json={"resolution_note": "Full refund processed"},
+    )
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "resolved"
+    assert (await gw.get(f"/api/orders/{paid['id']}", headers=b_hdr)).json()["status"] == "refunded"
+
+    overview = (await gw.get("/api/analytics/overview", headers=s_hdr)).json()
+    assert overview["refunds_total"] == 979.99
+    assert overview["net_revenue"] == 0.0
+
+    # 8. Dashboard aggregates all 7 sections cleanly
+    dash = (await gw.get("/api/dashboard", headers=b_hdr)).json()
+    assert dash["degraded_services"] == []
+    assert dash["cart"] is not None
+    assert len(dash["recent_shipments"]) == 1
+    assert dash["loyalty_summary"]["computed_tier"] == "silver"
+

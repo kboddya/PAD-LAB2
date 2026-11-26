@@ -37,6 +37,7 @@ services:
       - shopflow-net
 
   auth-service:
+    image: shopflow/auth-service:${IMAGE_TAG:-1.0.0}
     build:
       context: .
       dockerfile: services/auth-service/Dockerfile
@@ -65,6 +66,7 @@ services:
       - shopflow-net
 
   user-service:
+    image: shopflow/user-service:${IMAGE_TAG:-1.0.0}
     build:
       context: .
       dockerfile: services/user-service/Dockerfile
@@ -93,6 +95,7 @@ services:
       - shopflow-net
 
   product-service:
+    image: shopflow/product-service:${IMAGE_TAG:-1.0.0}
     build:
       context: .
       dockerfile: services/product-service/Dockerfile
@@ -120,44 +123,8 @@ services:
     networks:
       - shopflow-net
 
-  order-service:
-    build:
-      context: .
-      dockerfile: services/order-service/Dockerfile
-    container_name: shopflow-order-service
-    environment:
-      ORDER_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-shopflow_user}:${POSTGRES_PASSWORD:-shopflow_password}@postgres:5432/order_db
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
-      JWT_SECRET: ${JWT_SECRET:-dev-super-secret-change-in-production-32chars}
-      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-32chars}
-      USER_SERVICE_URL: http://user-service:8002
-      PRODUCT_SERVICE_URL: http://product-service:8003
-      PAYMENT_SERVICE_URL: http://payment-service:8005
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      LOG_JSON: ${LOG_JSON:-true}
-    expose:
-      - "8004"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      user-service:
-        condition: service_healthy
-      product-service:
-        condition: service_healthy
-      payment-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=2)"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - shopflow-net
-
   payment-service:
+    image: shopflow/payment-service:${IMAGE_TAG:-1.0.0}
     build:
       context: .
       dockerfile: services/payment-service/Dockerfile
@@ -186,6 +153,7 @@ services:
       - shopflow-net
 
   notification-service:
+    image: shopflow/notification-service:${IMAGE_TAG:-1.0.0}
     build:
       context: .
       dockerfile: services/notification-service/Dockerfile
@@ -213,7 +181,256 @@ services:
     networks:
       - shopflow-net
 
+  promotion-service:
+    image: shopflow/promotion-service:${IMAGE_TAG:-1.0.0}
+    build:
+      context: .
+      dockerfile: services/promotion-service/Dockerfile
+    container_name: shopflow-promotion-service
+    environment:
+      PROMOTION_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-shopflow_user}:${POSTGRES_PASSWORD:-shopflow_password}@postgres:5432/promotion_db
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      JWT_SECRET: ${JWT_SECRET:-dev-super-secret-change-in-production-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-32chars}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
+    expose:
+      - "8008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopflow-net
+
+  shipping-service:
+    image: shopflow/shipping-service:${IMAGE_TAG:-1.0.0}
+    build:
+      context: .
+      dockerfile: services/shipping-service/Dockerfile
+    container_name: shopflow-shipping-service
+    environment:
+      SHIPPING_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-shopflow_user}:${POSTGRES_PASSWORD:-shopflow_password}@postgres:5432/shipping_db
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      JWT_SECRET: ${JWT_SECRET:-dev-super-secret-change-in-production-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-32chars}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
+    expose:
+      - "8009"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8009/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopflow-net
+
+  analytics-service:
+    image: shopflow/analytics-service:${IMAGE_TAG:-1.0.0}
+    build:
+      context: .
+      dockerfile: services/analytics-service/Dockerfile
+    container_name: shopflow-analytics-service
+    environment:
+      ANALYTICS_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-shopflow_user}:${POSTGRES_PASSWORD:-shopflow_password}@postgres:5432/analytics_db
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      JWT_SECRET: ${JWT_SECRET:-dev-super-secret-change-in-production-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-32chars}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
+    expose:
+      - "8012"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopflow-net
+
+  order-service:
+    image: shopflow/order-service:${IMAGE_TAG:-1.0.0}
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    container_name: shopflow-order-service
+    environment:
+      ORDER_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-shopflow_user}:${POSTGRES_PASSWORD:-shopflow_password}@postgres:5432/order_db
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      JWT_SECRET: ${JWT_SECRET:-dev-super-secret-change-in-production-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-32chars}
+      USER_SERVICE_URL: http://user-service:8002
+      PRODUCT_SERVICE_URL: http://product-service:8003
+      PAYMENT_SERVICE_URL: http://payment-service:8005
+      PROMOTION_SERVICE_URL: http://promotion-service:8008
+      SHIPPING_SERVICE_URL: http://shipping-service:8009
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
+    expose:
+      - "8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      promotion-service:
+        condition: service_healthy
+      shipping-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8004/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopflow-net
+
+  cart-service:
+    image: shopflow/cart-service:${IMAGE_TAG:-1.0.0}
+    build:
+      context: .
+      dockerfile: services/cart-service/Dockerfile
+    container_name: shopflow-cart-service
+    environment:
+      CART_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-shopflow_user}:${POSTGRES_PASSWORD:-shopflow_password}@postgres:5432/cart_db
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      JWT_SECRET: ${JWT_SECRET:-dev-super-secret-change-in-production-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-32chars}
+      USER_SERVICE_URL: http://user-service:8002
+      PRODUCT_SERVICE_URL: http://product-service:8003
+      PROMOTION_SERVICE_URL: http://promotion-service:8008
+      ORDER_SERVICE_URL: http://order-service:8004
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
+    expose:
+      - "8007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      promotion-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8007/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopflow-net
+
+  review-service:
+    image: shopflow/review-service:${IMAGE_TAG:-1.0.0}
+    build:
+      context: .
+      dockerfile: services/review-service/Dockerfile
+    container_name: shopflow-review-service
+    environment:
+      REVIEW_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-shopflow_user}:${POSTGRES_PASSWORD:-shopflow_password}@postgres:5432/review_db
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      JWT_SECRET: ${JWT_SECRET:-dev-super-secret-change-in-production-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-32chars}
+      PRODUCT_SERVICE_URL: http://product-service:8003
+      ORDER_SERVICE_URL: http://order-service:8004
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
+    expose:
+      - "8010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopflow-net
+
+  support-service:
+    image: shopflow/support-service:${IMAGE_TAG:-1.0.0}
+    build:
+      context: .
+      dockerfile: services/support-service/Dockerfile
+    container_name: shopflow-support-service
+    environment:
+      SUPPORT_DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-shopflow_user}:${POSTGRES_PASSWORD:-shopflow_password}@postgres:5432/support_db
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      JWT_SECRET: ${JWT_SECRET:-dev-super-secret-change-in-production-32chars}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-dev-internal-service-token-32chars}
+      USER_SERVICE_URL: http://user-service:8002
+      ORDER_SERVICE_URL: http://order-service:8004
+      SHIPPING_SERVICE_URL: http://shipping-service:8009
+      PAYMENT_SERVICE_URL: http://payment-service:8005
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_JSON: ${LOG_JSON:-true}
+    expose:
+      - "8011"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      shipping-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8011/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shopflow-net
+
   api-gateway:
+    image: shopflow/api-gateway:${IMAGE_TAG:-1.0.0}
     build:
       context: .
       dockerfile: gateway/Dockerfile
@@ -228,6 +445,12 @@ services:
       ORDER_SERVICE_URL: http://order-service:8004
       PAYMENT_SERVICE_URL: http://payment-service:8005
       NOTIFICATION_SERVICE_URL: http://notification-service:8006
+      CART_SERVICE_URL: http://cart-service:8007
+      PROMOTION_SERVICE_URL: http://promotion-service:8008
+      SHIPPING_SERVICE_URL: http://shipping-service:8009
+      REVIEW_SERVICE_URL: http://review-service:8010
+      SUPPORT_SERVICE_URL: http://support-service:8011
+      ANALYTICS_SERVICE_URL: http://analytics-service:8012
       RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-60}
       RATE_LIMIT_WINDOW_SECONDS: ${RATE_LIMIT_WINDOW_SECONDS:-60}
       PROXY_TIMEOUT_SECONDS: ${PROXY_TIMEOUT_SECONDS:-10.0}
@@ -249,6 +472,18 @@ services:
         condition: service_healthy
       notification-service:
         condition: service_healthy
+      cart-service:
+        condition: service_healthy
+      promotion-service:
+        condition: service_healthy
+      shipping-service:
+        condition: service_healthy
+      review-service:
+        condition: service_healthy
+      support-service:
+        condition: service_healthy
+      analytics-service:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
       interval: 10s
@@ -258,6 +493,7 @@ services:
       - shopflow-net
 
   frontend:
+    image: shopflow/frontend:${IMAGE_TAG:-1.0.0}
     build:
       context: .
       dockerfile: frontend/Dockerfile

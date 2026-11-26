@@ -67,6 +67,29 @@ def create_app(
     bus.on("payment.failed", _on_saga_compensation)
     bus.on("order.cancelled", _on_saga_compensation)
 
+    def _on_review_summary_changed(envelope: EventEnvelope) -> None:
+        data = envelope.payload
+        product_id = str(data.get("product_id", ""))
+        if not product_id:
+            return
+        avg_rating = float(data.get("average_rating", 0.0))
+        rev_count = int(data.get("review_count", 0))
+        with db.session_scope() as session:
+            domain.update_rating_summary(
+                session,
+                product_id,
+                average_rating=avg_rating,
+                review_count=rev_count,
+            )
+        logger.info(
+            "Updated product rating summary from review event",
+            extra={"product_id": product_id, "average_rating": avg_rating, "review_count": rev_count},
+        )
+
+    bus.on("review.published", _on_review_summary_changed)
+    bus.on("review.updated", _on_review_summary_changed)
+    bus.on("review.deleted", _on_review_summary_changed)
+
     def _get_caller(request: Request) -> UserContext:
         return extract_user_context(
             request,
@@ -142,6 +165,12 @@ def create_app(
             actor_id=caller.user_id,
             actor_role=caller.role,
         )
+        if payload.is_active is False:
+            await bus.publish(
+                event_type="product.deactivated",
+                payload={"product_id": product_id, "actor_id": caller.user_id},
+                source_service=cfg.service_name,
+            )
         return ProductResponse.model_validate(product)
 
     @router.delete(
@@ -157,6 +186,11 @@ def create_app(
         caller = _get_caller(request)
         require_roles(caller, {"seller", "admin"})
         domain.delete_product(session, product_id, actor_id=caller.user_id, actor_role=caller.role)
+        await bus.publish(
+            event_type="product.deactivated",
+            payload={"product_id": product_id, "actor_id": caller.user_id},
+            source_service=cfg.service_name,
+        )
         return {"status": "deleted", "product_id": product_id}
 
     @router.post(

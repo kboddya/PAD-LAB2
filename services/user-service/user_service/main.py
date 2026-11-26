@@ -62,6 +62,21 @@ def create_app(
 
     bus.on("user.registered", _on_user_registered)
 
+    def _on_loyalty_upgraded(envelope: EventEnvelope) -> None:
+        data = envelope.payload
+        user_id = str(data.get("user_id", ""))
+        new_tier = str(data.get("new_tier", ""))
+        if not user_id or not new_tier:
+            return
+        with db.session_scope() as session:
+            domain.upgrade_loyalty_tier(session, user_id, new_tier)
+        logger.info(
+            "Updated user loyalty tier from loyalty.upgraded event",
+            extra={"user_id": user_id, "new_tier": new_tier},
+        )
+
+    bus.on("loyalty.upgraded", _on_loyalty_upgraded)
+
     def _get_caller(request: Request) -> UserContext:
         return extract_user_context(
             request,

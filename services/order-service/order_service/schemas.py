@@ -16,6 +16,8 @@ class OrderItemInput(BaseModel):
 class OrderCreateRequest(BaseModel):
     items: list[OrderItemInput] = Field(..., min_length=1)
     shipping_address: str = Field(..., min_length=5, max_length=500)
+    shipping_method: Literal["standard", "express", "pickup"] | None = None
+    coupon_code: str | None = Field(default=None, max_length=64)
     payment_method: str = Field(default="card", min_length=2, max_length=32)
     currency: str = Field(default="USD", min_length=3, max_length=8)
     idempotency_key: str | None = Field(default=None, max_length=128)
@@ -42,8 +44,13 @@ class OrderResponse(BaseModel):
     id: str
     user_id: str
     status: str
+    subtotal_amount: float = 0.0
+    discount_amount: float = 0.0
+    shipping_cost: float = 0.0
     total_amount: float
     currency: str
+    coupon_code: str | None = None
+    shipping_method: str = "standard"
     shipping_address: str
     payment_id: str | None
     failure_reason: str | None

@@ -119,6 +119,25 @@ class ProductDomainService:
         product.updated_at = datetime.now(timezone.utc)
         session.commit()
 
+    def update_rating_summary(
+        self,
+        session: Session,
+        product_id: str,
+        *,
+        average_rating: float,
+        review_count: int,
+    ) -> Product | None:
+        """Update cached rating statistics projected from review-service events."""
+        product = session.get(Product, product_id)
+        if product is None:
+            return None
+        product.average_rating = round(float(average_rating), 2)
+        product.review_count = max(0, int(review_count))
+        product.updated_at = datetime.now(timezone.utc)
+        session.commit()
+        session.refresh(product)
+        return product
+
     def reserve_stock(
         self,
         session: Session,

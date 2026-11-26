@@ -81,6 +81,21 @@ class UserDomainService:
         session.commit()
         return self.get_profile(session, user_id)
 
+    def upgrade_loyalty_tier(self, session: Session, user_id: str, new_tier: str) -> UserProfile | None:
+        """Promote a user's loyalty tier based on analytics events without downgrading."""
+        tier_ranks = {"standard": 0, "silver": 1, "gold": 2}
+        if new_tier not in tier_ranks:
+            return None
+        profile = session.get(UserProfile, user_id)
+        if profile is None:
+            return None
+        if tier_ranks[new_tier] > tier_ranks.get(profile.loyalty_tier, 0):
+            profile.loyalty_tier = new_tier
+            profile.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            session.refresh(profile)
+        return profile
+
     def add_address(self, session: Session, user_id: str, payload: AddressCreateRequest) -> ShippingAddress:
         profile = self.get_profile(session, user_id)
         if payload.is_default:

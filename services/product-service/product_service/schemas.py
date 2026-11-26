@@ -43,6 +43,8 @@ class ProductResponse(BaseModel):
     reserved_quantity: int
     available_quantity: int
     seller_id: str
+    average_rating: float = 0.0
+    review_count: int = 0
     is_active: bool
     created_at: datetime
     updated_at: datetime

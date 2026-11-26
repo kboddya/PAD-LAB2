@@ -76,6 +76,34 @@ def create_app(
     bus.on("payment.succeeded", _on_payment_succeeded)
     bus.on("payment.failed", _on_payment_failed)
 
+    def _on_shipment_dispatched(envelope: EventEnvelope) -> None:
+        order_id = str(envelope.payload.get("order_id", ""))
+        if not order_id:
+            return
+        with db.session_scope() as session:
+            domain.apply_shipment_status(session, order_id=order_id, new_status="shipped")
+        logger.info("Order marked as shipped via shipment event", extra={"order_id": order_id})
+
+    def _on_shipment_delivered(envelope: EventEnvelope) -> None:
+        order_id = str(envelope.payload.get("order_id", ""))
+        if not order_id:
+            return
+        with db.session_scope() as session:
+            domain.apply_shipment_status(session, order_id=order_id, new_status="delivered")
+        logger.info("Order marked as delivered via shipment event", extra={"order_id": order_id})
+
+    def _on_payment_refunded(envelope: EventEnvelope) -> None:
+        order_id = str(envelope.payload.get("order_id", ""))
+        if not order_id:
+            return
+        with db.session_scope() as session:
+            domain.apply_refund_status(session, order_id=order_id)
+        logger.info("Order marked as refunded via payment event", extra={"order_id": order_id})
+
+    bus.on("shipment.dispatched", _on_shipment_dispatched)
+    bus.on("shipment.delivered", _on_shipment_delivered)
+    bus.on("payment.refunded", _on_payment_refunded)
+
     def _get_caller(request: Request) -> UserContext:
         return extract_user_context(
             request,
@@ -101,37 +129,93 @@ def create_app(
         headers = domain._service_headers(caller.user_id, caller.role)
 
         # 1. Verify buyer profile exists in user-service
-        await domain.verify_user_exists(client, caller.user_id, caller.role)
+        user_profile = await domain.verify_user_exists(client, caller.user_id, caller.role)
+        loyalty_tier = str(user_profile.get("loyalty_tier", "standard"))
 
         # 2. Reserve stock in product-service (rolls back on partial failure)
         order_id = domain.new_order_id()
         reserved_items = await domain.reserve_items(client, order_id, payload, headers)
+        subtotal = round(sum(item["quantity"] * item["unit_price"] for item in reserved_items), 2)
+        categories = sorted({str(item.get("category", "")) for item in reserved_items if item.get("category")})
+        total_units = sum(int(item["quantity"]) for item in reserved_items)
 
-        # 3. Persist pending order and emit order.created
+        # 3. Optionally redeem promotional coupon & calculate shipping quote
+        discount_amount = 0.0
+        applied_coupon: str | None = None
+        if payload.coupon_code:
+            try:
+                redeemed = await domain.redeem_coupon(
+                    client,
+                    order_id=order_id,
+                    user_id=caller.user_id,
+                    coupon_code=payload.coupon_code,
+                    subtotal=subtotal,
+                    loyalty_tier=loyalty_tier,
+                    categories=categories,
+                    headers=headers,
+                )
+                discount_amount = float(redeemed.get("discount_amount", 0.0))
+                applied_coupon = str(redeemed.get("code", payload.coupon_code.strip().upper()))
+            except Exception:
+                await domain.release_items_best_effort(client, order_id, reserved_items, headers)
+                raise
+
+        shipping_cost = 0.0
+        effective_shipping_method = payload.shipping_method or "standard"
+        if payload.shipping_method is not None:
+            try:
+                shipping_cost = await domain.quote_shipping(
+                    client,
+                    shipping_method=payload.shipping_method,
+                    items_count=total_units,
+                    subtotal=subtotal,
+                    loyalty_tier=loyalty_tier,
+                    headers=headers,
+                )
+            except Exception:
+                await domain.release_items_best_effort(client, order_id, reserved_items, headers)
+                if applied_coupon:
+                    await domain.release_coupon_best_effort(client, order_id, headers)
+                raise
+
+        # 4. Persist pending order and emit order.created
         order = domain.create_order_record(
             session,
             order_id=order_id,
             user_id=caller.user_id,
             payload=payload,
             reserved_items=reserved_items,
+            subtotal_amount=subtotal,
+            discount_amount=discount_amount,
+            shipping_cost=shipping_cost,
+            coupon_code=applied_coupon,
+            shipping_method=effective_shipping_method,
         )
         await bus.publish(
             event_type="order.created",
             payload={
                 "order_id": order.id,
                 "user_id": order.user_id,
+                "subtotal_amount": order.subtotal_amount,
+                "discount_amount": order.discount_amount,
+                "shipping_cost": order.shipping_cost,
                 "total_amount": order.total_amount,
                 "currency": order.currency,
+                "coupon_code": order.coupon_code,
+                "shipping_method": order.shipping_method,
+                "shipping_address": order.shipping_address,
                 "items": reserved_items,
             },
             source_service=cfg.service_name,
         )
 
-        # 4. Initiate payment; compensate inventory if payment-service is unavailable
+        # 5. Initiate payment; compensate inventory and coupon if payment-service is unavailable
         try:
             payment_data = await domain.initiate_payment(client, order, payload, headers)
         except Exception as exc:
             await domain.release_items_best_effort(client, order.id, reserved_items, headers)
+            if applied_coupon:
+                await domain.release_coupon_best_effort(client, order.id, headers)
             domain.apply_payment_result(
                 session,
                 order_id=order.id,

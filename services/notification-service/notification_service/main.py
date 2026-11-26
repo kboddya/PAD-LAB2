@@ -57,6 +57,31 @@ def _build_event_formatters() -> dict[str, _EventFormatter]:
             "Payment refunded",
             f"Payment {p.get('payment_id')} of {p.get('amount')} {p.get('currency', 'USD')} was refunded.",
         ),
+        "shipment.dispatched": lambda p: (
+            "shipment_dispatched",
+            "Order shipped",
+            f"Order {p.get('order_id')} has been dispatched (tracking {p.get('tracking_number', '-')}).",
+        ),
+        "shipment.delivered": lambda p: (
+            "shipment_delivered",
+            "Order delivered",
+            f"Order {p.get('order_id')} (tracking {p.get('tracking_number', '-')}) has been delivered.",
+        ),
+        "review.published": lambda p: (
+            "review_published",
+            "New verified review received",
+            f"Product {p.get('product_id')} received a {p.get('rating')}/5 verified review.",
+        ),
+        "ticket.resolved": lambda p: (
+            "ticket_resolved",
+            "Support ticket resolved",
+            f"Support ticket {p.get('ticket_id')} has been resolved: {p.get('resolution_note') or 'completed'}.",
+        ),
+        "loyalty.upgraded": lambda p: (
+            "loyalty_upgraded",
+            f"Loyalty tier upgraded to {str(p.get('new_tier', '')).upper()}!",
+            f"Congratulations! Your loyalty tier is now {p.get('new_tier')}.",
+        ),
     }
 
 
@@ -82,7 +107,7 @@ def create_app(
 
     def _handle_domain_event(envelope: EventEnvelope) -> None:
         formatter = formatters.get(envelope.event_type)
-        user_id = envelope.payload.get("user_id")
+        user_id = envelope.payload.get("recipient_user_id") or envelope.payload.get("user_id")
         if formatter is None or not user_id:
             return
         category, title, message = formatter(envelope.payload)

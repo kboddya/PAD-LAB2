@@ -90,6 +90,7 @@ class OrderDomainService:
                     {
                         "product_id": product_id,
                         "product_name": str(product_data["name"]),
+                        "category": str(product_data.get("category", "")),
                         "quantity": qty,
                         "unit_price": float(product_data["price"]),
                     }
@@ -172,6 +173,94 @@ class OrderDomainService:
                     exc,
                 )
 
+    async def redeem_coupon(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        order_id: str,
+        user_id: str,
+        coupon_code: str,
+        subtotal: float,
+        loyalty_tier: str,
+        categories: list[str],
+        headers: dict[str, str],
+    ) -> dict[str, Any]:
+        url = f"{self.settings.promotion_service_url}/promotions/redeem"
+        body = {
+            "order_id": order_id,
+            "user_id": user_id,
+            "code": coupon_code.strip().upper(),
+            "order_subtotal": subtotal,
+            "loyalty_tier": loyalty_tier,
+            "categories": categories,
+        }
+        try:
+            resp = await client.post(url, json=body, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise ServiceTimeoutError("promotion-service timed out during coupon redemption") from exc
+        except httpx.HTTPError as exc:
+            raise ServiceUnavailableError("promotion-service is unavailable") from exc
+
+        if resp.status_code >= 500:
+            raise ServiceUnavailableError("promotion-service returned an internal error")
+        if resp.status_code == 404:
+            msg, code = self._extract_error_detail(resp, f"Promotion '{coupon_code}' not found")
+            raise NotFoundError(msg, error_code=code or "PROMOTION_NOT_FOUND")
+        if resp.status_code == 409:
+            msg, code = self._extract_error_detail(resp, "Coupon limit exceeded or conflict")
+            raise ConflictError(msg, error_code=code or "COUPON_CONFLICT")
+        if resp.status_code >= 400:
+            msg, code = self._extract_error_detail(resp, "Coupon validation failed")
+            raise BadRequestError(msg, error_code=code or "INVALID_COUPON")
+        return resp.json()
+
+    async def release_coupon_best_effort(
+        self,
+        client: httpx.AsyncClient,
+        order_id: str,
+        headers: dict[str, str],
+    ) -> None:
+        url = f"{self.settings.promotion_service_url}/promotions/release"
+        try:
+            await client.post(url, json={"order_id": order_id}, headers=headers)
+        except httpx.HTTPError as exc:
+            self.logger.warning(
+                "Best-effort coupon release failed for order %s: %s",
+                order_id,
+                exc,
+            )
+
+    async def quote_shipping(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        shipping_method: str,
+        items_count: int,
+        subtotal: float,
+        loyalty_tier: str,
+        headers: dict[str, str],
+    ) -> float:
+        url = f"{self.settings.shipping_service_url}/shipping/quotes"
+        body = {
+            "shipping_method": shipping_method,
+            "items_count": items_count,
+            "order_subtotal": subtotal,
+            "loyalty_tier": loyalty_tier,
+        }
+        try:
+            resp = await client.post(url, json=body, headers=headers)
+        except httpx.TimeoutException as exc:
+            raise ServiceTimeoutError("shipping-service timed out during shipping quote") from exc
+        except httpx.HTTPError as exc:
+            raise ServiceUnavailableError("shipping-service is unavailable") from exc
+
+        if resp.status_code >= 500:
+            raise ServiceUnavailableError("shipping-service returned an internal error")
+        if resp.status_code >= 400:
+            msg, code = self._extract_error_detail(resp, "Invalid shipping quote request")
+            raise BadRequestError(msg, error_code=code or "INVALID_SHIPPING_METHOD")
+        return round(float(resp.json().get("cost", 0.0)), 2)
+
     def create_order_record(
         self,
         session: Session,
@@ -180,14 +269,31 @@ class OrderDomainService:
         user_id: str,
         payload: OrderCreateRequest,
         reserved_items: list[dict[str, Any]],
+        subtotal_amount: float | None = None,
+        discount_amount: float = 0.0,
+        shipping_cost: float = 0.0,
+        coupon_code: str | None = None,
+        shipping_method: str = "standard",
     ) -> Order:
-        total = round(sum(item["quantity"] * item["unit_price"] for item in reserved_items), 2)
+        subtotal = (
+            round(float(subtotal_amount), 2)
+            if subtotal_amount is not None
+            else round(sum(item["quantity"] * item["unit_price"] for item in reserved_items), 2)
+        )
+        discount = round(max(0.0, float(discount_amount)), 2)
+        shipping = round(max(0.0, float(shipping_cost)), 2)
+        total = round(max(0.01, subtotal - discount + shipping), 2)
         order = Order(
             id=order_id,
             user_id=user_id,
             status="pending",
+            subtotal_amount=subtotal,
+            discount_amount=discount,
+            shipping_cost=shipping,
             total_amount=total,
             currency=payload.currency.strip().upper(),
+            coupon_code=coupon_code,
+            shipping_method=shipping_method,
             shipping_address=payload.shipping_address.strip(),
         )
         for item in reserved_items:
@@ -308,16 +414,51 @@ class OrderDomainService:
         session.commit()
         return self.get_order(session, order_id)
 
+    def apply_shipment_status(self, session: Session, *, order_id: str, new_status: str) -> Order | None:
+        """Advance order fulfillment status from shipment events without failing on non-matching states."""
+        order = session.get(Order, order_id)
+        if order is None:
+            return None
+        if new_status == "shipped" and order.status == "paid":
+            order.status = "shipped"
+            order.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            return self.get_order(session, order_id)
+        if new_status == "delivered" and order.status in {"paid", "shipped"}:
+            order.status = "delivered"
+            order.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            return self.get_order(session, order_id)
+        return order
+
+    def apply_refund_status(self, session: Session, *, order_id: str) -> Order | None:
+        """Mark order refunded upon payment.refunded event."""
+        order = session.get(Order, order_id)
+        if order is None:
+            return None
+        if order.status in {"paid", "shipped", "delivered"}:
+            order.status = "refunded"
+            order.updated_at = datetime.now(timezone.utc)
+            session.commit()
+            return self.get_order(session, order_id)
+        return order
+
     @staticmethod
     def new_order_id() -> str:
         return str(uuid.uuid4())
 
     @staticmethod
-    def _extract_error_message(resp: httpx.Response, fallback: str) -> str:
+    def _extract_error_detail(resp: httpx.Response, fallback: str) -> tuple[str, str | None]:
         try:
             body = resp.json()
             if isinstance(body, dict) and "error" in body and isinstance(body["error"], dict):
-                return str(body["error"].get("message", fallback))
+                err = body["error"]
+                return str(err.get("message", fallback)), str(err.get("code")) if err.get("code") else None
         except Exception:
             pass
-        return fallback
+        return fallback, None
+
+    @staticmethod
+    def _extract_error_message(resp: httpx.Response, fallback: str) -> str:
+        msg, _ = OrderDomainService._extract_error_detail(resp, fallback)
+        return msg

@@ -16,4 +16,6 @@ class OrderSettings(BaseServiceSettings):
     user_service_url: str = "http://user-service:8002"
     product_service_url: str = "http://product-service:8003"
     payment_service_url: str = "http://payment-service:8005"
+    promotion_service_url: str = "http://promotion-service:8008"
+    shipping_service_url: str = "http://shipping-service:8009"
     downstream_timeout_seconds: float = 5.0

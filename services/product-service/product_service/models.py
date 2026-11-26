@@ -27,6 +27,8 @@ class Product(ProductBase):
     stock_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     reserved_quantity: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     seller_id: Mapped[str] = mapped_column(String(36), index=True, nullable=False)
+    average_rating: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    review_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

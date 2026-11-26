@@ -1,0 +1,1 @@
+"""ShopFlow promotion-service package."""

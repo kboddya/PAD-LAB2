@@ -7,6 +7,8 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+test-results.xml
+deploy-artifacts/
 
 # Environment & local DBs
 .env

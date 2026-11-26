@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart-service
+  namespace: shopflow
+  labels:
+    app: cart-service
+    app.kubernetes.io/part-of: shopflow-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: cart-service
+  ports:
+    - name: http
+      port: 8007
+      targetPort: 8007

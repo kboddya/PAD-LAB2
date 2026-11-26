@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: shipping-service
+  namespace: shopflow
+  labels:
+    app: shipping-service
+    app.kubernetes.io/part-of: shopflow-platform
+spec:
+  type: ClusterIP
+  selector:
+    app: shipping-service
+  ports:
+    - name: http
+      port: 8009
+      targetPort: 8009
